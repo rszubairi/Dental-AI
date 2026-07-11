@@ -33,6 +33,7 @@ class InferenceResponse(BaseModel):
     case_id: str
     model: str
     detections: list[DetectionResult]
+    missing_teeth: list[str]
 
 
 @app.get("/health")
@@ -45,10 +46,11 @@ def infer(req: InferenceRequest) -> InferenceResponse:
     if req.model != "tooth_detection":
         raise HTTPException(status_code=400, detail=f"Unknown model: {req.model}")
 
-    detections = _pipeline.run(req.image_url)
+    result = _pipeline.run(req.image_url)
     return InferenceResponse(
         job_id=req.job_id,
         case_id=req.case_id,
         model=req.model,
-        detections=[DetectionResult(**d) for d in detections],
+        detections=[DetectionResult(**d) for d in result["detections"]],
+        missing_teeth=result["missing_teeth"],
     )

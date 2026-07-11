@@ -12,6 +12,7 @@ import os
 import httpx
 
 from postprocessing.fdi_mapping import index_to_fdi
+from postprocessing.missing_tooth import find_missing_teeth
 from preprocessing.image_loader import load_image, normalize_for_model
 
 MODEL_CHECKPOINT_PATH = os.environ.get(
@@ -38,7 +39,7 @@ class ToothDetectionPipeline:
         self._model = YOLO(MODEL_CHECKPOINT_PATH)
         return self._model
 
-    def run(self, image_url: str) -> list[dict]:
+    def run(self, image_url: str) -> dict:
         model = self._load_model()
 
         raw_bytes = httpx.get(image_url, timeout=30.0).content
@@ -57,4 +58,6 @@ class ToothDetectionPipeline:
                     "confidence": float(box.conf.item()),
                 }
             )
-        return detections
+
+        missing_teeth = find_missing_teeth([d["fdi_number"] for d in detections])
+        return {"detections": detections, "missing_teeth": missing_teeth}
