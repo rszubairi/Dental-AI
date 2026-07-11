@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd apps/web && npm install",
+  "buildCommand": "cd apps/web && npx convex deploy --cmd 'npm run build' --cmd-url-env-var-name NEXT_PUBLIC_CONVEX_URL",
+  "outputDirectory": "apps/web/.next"
+}

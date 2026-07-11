@@ -8,11 +8,14 @@ Next.js -> Convex Mutation -> Inference Queue -> this service -> Convex -> Next.
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from inference import ToothDetectionPipeline
+from inference import PathologyClassificationPipeline, ToothDetectionPipeline
 
 app = FastAPI(title="Dental AI Inference Service", version="0.1.0")
 
-_pipeline = ToothDetectionPipeline()
+_tooth_pipeline = ToothDetectionPipeline()
+_pathology_pipeline = PathologyClassificationPipeline()
+
+SUPPORTED_MODELS = {"tooth_detection", "full_assessment"}
 
 
 class InferenceRequest(BaseModel):
@@ -26,6 +29,8 @@ class DetectionResult(BaseModel):
     fdi_number: str
     bbox: list[float]
     confidence: float
+    pathology: str | None = None
+    pathology_confidence: float | None = None
 
 
 class InferenceResponse(BaseModel):
@@ -43,14 +48,21 @@ def health() -> dict[str, str]:
 
 @app.post("/v1/infer", response_model=InferenceResponse)
 def infer(req: InferenceRequest) -> InferenceResponse:
-    if req.model != "tooth_detection":
+    if req.model not in SUPPORTED_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {req.model}")
 
-    result = _pipeline.run(req.image_url)
+    if req.model == "tooth_detection":
+        result = _tooth_pipeline.run(req.image_url)
+        detections = result["detections"]
+        missing_teeth = result["missing_teeth"]
+    else:  # full_assessment: tooth detection + per-tooth pathology classification
+        raw_detections, missing_teeth, image = _tooth_pipeline.run_with_image(req.image_url)
+        detections = _pathology_pipeline.classify_crops(image, raw_detections)
+
     return InferenceResponse(
         job_id=req.job_id,
         case_id=req.case_id,
         model=req.model,
-        detections=[DetectionResult(**d) for d in result["detections"]],
-        missing_teeth=result["missing_teeth"],
+        detections=[DetectionResult(**d) for d in detections],
+        missing_teeth=missing_teeth,
     )

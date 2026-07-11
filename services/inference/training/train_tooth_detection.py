@@ -11,9 +11,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import torch
 from ultralytics import YOLO
+
+from pipeline_state import is_step_complete, mark_step_complete, reset_step
+
+STEP_NAME = "stage1"
 
 # Batch size thresholds are conservative to keep training stable on <8GB GPUs.
 VRAM_BATCH_THRESHOLD_GB = 8
@@ -41,8 +46,24 @@ def main() -> None:
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--base-model", default="yolov8s.pt")
     parser.add_argument("--batch", type=int, default=None, help="Overrides VRAM auto-detection")
-    parser.add_argument("--project", default="../models/tooth_detection/runs/stage1")
+    parser.add_argument("--project", default="runs/stage1")
+    parser.add_argument(
+        "--reset-step",
+        action="store_true",
+        help="Delete existing stage1 output and retrain from scratch, even if already complete",
+    )
     args = parser.parse_args()
+
+    project_dir = Path(args.project)
+
+    if args.reset_step:
+        reset_step(STEP_NAME, project_dir)
+    elif is_step_complete(STEP_NAME):
+        print(
+            f"{STEP_NAME} already complete per .dental_ai_state.json. "
+            "Pass --reset-step to retrain from scratch."
+        )
+        return
 
     batch = args.batch if args.batch is not None else detect_batch_size()
 
@@ -75,6 +96,16 @@ def main() -> None:
         hsv_s=0.0,
         mosaic=0.0,
     )
+
+    best_checkpoint = project_dir / "train" / "weights" / "best.pt"
+    val_map50 = 0.0
+    try:
+        metrics = model.val()
+        val_map50 = float(metrics.box.map50)
+    except Exception as exc:  # noqa: BLE001 - best-effort metric capture, training already succeeded
+        print(f"Could not compute final val mAP@0.5 for state tracking: {exc}")
+
+    mark_step_complete(STEP_NAME, str(best_checkpoint), "map50", val_map50)
 
 
 if __name__ == "__main__":
