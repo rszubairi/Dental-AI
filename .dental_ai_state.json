@@ -1,0 +1,26 @@
+{
+  "pretrain_quadrant": {
+    "complete": true,
+    "checkpoint": "runs\\pretrain_quadrant\\train\\weights\\best.pt",
+    "map50": 0.995,
+    "completed_at": "2026-08-10T07:12:42.866325+00:00"
+  },
+  "stage1": {
+    "complete": true,
+    "checkpoint": "runs\\stage1\\train\\weights\\best.pt",
+    "map50": 0.9595765939972862,
+    "completed_at": "2026-08-10T10:34:27.905491+00:00"
+  },
+  "stage2a": {
+    "complete": true,
+    "checkpoint": "runs\\stage2a\\best.pt",
+    "macro_auc": 0.9028913184534272,
+    "completed_at": "2026-08-10T12:37:12.488443+00:00"
+  },
+  "stage2b": {
+    "complete": true,
+    "checkpoint": "runs\\stage2b_smoketest\\best.pt",
+    "mre_mm": 120.86575630628452,
+    "completed_at": "2026-08-10T15:25:28.811996+00:00"
+  }
+}

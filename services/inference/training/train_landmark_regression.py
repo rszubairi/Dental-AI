@@ -118,6 +118,15 @@ def main() -> None:
         action="store_true",
         help="Delete existing stage2b output and retrain from scratch, even if already complete",
     )
+    parser.add_argument(
+        "--min-images",
+        type=int,
+        default=MIN_IMAGES,
+        help=(
+            f"Override the {MIN_IMAGES}-image floor (testing only -- with too few images "
+            "the val split may be tiny/empty and MRE numbers are not meaningful)."
+        ),
+    )
     args = parser.parse_args()
 
     data_dir = Path(args.data)
@@ -133,10 +142,10 @@ def main() -> None:
         return
 
     stems = discover_stems(data_dir)
-    if len(stems) < MIN_IMAGES:
+    if len(stems) < args.min_images:
         print(
             f"BLOCKED: found {len(stems)} annotated images under {data_dir}, "
-            f"but Stage 2B requires a minimum of {MIN_IMAGES}. "
+            f"but Stage 2B requires a minimum of {args.min_images}. "
             "This stage cannot train until client-provided landmark annotations arrive "
             "(see datasets/landmarks/README.md)."
         )

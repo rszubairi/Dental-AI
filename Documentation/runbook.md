@@ -53,7 +53,17 @@ python3 train_pathology_classifier.py --data ../../../datasets/dentex/stage2a
 Outputs runs/stage2a/best.pt, last.pt, classes.json.
 Target: macro AUC-ROC ≥ 0.85.
 7. Stage 2B — blocked until you have client data
-Collect ≥200 annotated OPGs per datasets/landmarks/README.md's format (images/*.png + annotations/*.json with bone_crest/sinus_floor/nerve_canal normalized point lists). Once available:
+Collect ≥200 annotated OPGs per datasets/landmarks/README.md's format (images/*.png + annotations/*.json with bone_crest/sinus_floor/nerve_canal normalized point lists).
+
+No auto-labeling shortcut exists for this stage (unlike Stage 1) — no model has ever been trained to predict these landmarks, so there's nothing to run inference with yet. First batch must be annotated manually in Label Studio, either with KeyPointLabels (points) or PolygonLabels (outlines) for "bone_crest", "sinus_floor", "nerve_canal" — both are supported by the converter. Export the project as JSON (native Label Studio export, not YOLO), then convert into this project's layout:
+
+cd datasets/landmarks
+python import_label_studio_export.py --export path/to/project-export.json
+Writes images/<stem>.png + annotations/<stem>.json. For keypoint annotations, points are used directly. For polygon annotations, each polygon is rasterized and skeletonized (scikit-image) to extract an ordered centerline through the structure — this matters because a polygon traces a structure's boundary/width, not its path, so using raw polygon vertices as landmark points would produce a ring around the structure instead of points tracing through it.
+Any other label found in the export (e.g. a pathology taxonomy like "interproximal_mild/moderate/severe" that doesn't match any Stage 2A class) is written to unmatched_labels.json for review rather than silently dropped or merged in.
+Set LABEL_STUDIO_URL / LABEL_STUDIO_ACCESS_TOKEN env vars if images are stored in Label Studio itself (local/uploaded storage) rather than external URLs — Label Studio prefixes uploaded filenames with a hash (e.g. "7592fbd2-train_0.png"), which the converter strips to recover the original stem.
+
+Once available:
 
 
 python3 train_landmark_regression.py --data ../../../datasets/landmarks
@@ -90,3 +100,16 @@ git -C apps/web checkout main
 git -C apps/web branch --show-current
 
 label-studio
+
+9. Auto-labeling in Label Studio via the Stage 1 model
+Runs a trained checkpoint as a Label Studio ML backend so new images get pre-annotated boxes to review/correct instead of labeling from scratch.
+
+cd services/inference
+TOOTH_DETECTION_CHECKPOINT=../../runs/detect/runs/stage1/train/weights/best.pt \
+    uvicorn label_studio_ml_backend:app --host 0.0.0.0 --port 9090
+In Label Studio: Settings -> Model -> Connect Model -> URL http://localhost:9090 (or the LAN/host address if Label Studio runs elsewhere, e.g. Docker).
+Label Studio's rectangle labels in your labeling config must be named as plain FDI tooth numbers ("11".."48") to match the model's class names.
+If Label Studio stores images itself (local/uploaded storage, not external URLs), set LABEL_STUDIO_URL and LABEL_STUDIO_ACCESS_TOKEN env vars so the backend can fetch them with auth.
+Tune sensitivity with LS_CONFIDENCE_THRESHOLD (default 0.25) — lower surfaces more (noisier) boxes to correct, higher surfaces fewer but more confident ones.
+Tested locally against a real dataset image (datasets/Dentex/yolo/images/test/train_101.png) via curl — predictions returned correct percentage-based boxes and FDI labels.
+After labeling more data with this assist, re-run datasets/Dentex/import_label_studio_export.py to fold the new labels into the training set.
