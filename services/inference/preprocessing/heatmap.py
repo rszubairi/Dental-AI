@@ -30,6 +30,25 @@ def extract_peak(heatmap: np.ndarray) -> tuple[float, float]:
     return float(x), float(y)
 
 
+def extract_local_peak(heatmap: np.ndarray, center: tuple[float, float], window: float) -> tuple[float, float]:
+    """Return the (x, y) pixel coordinate of the maximum value within `window`
+    pixels of `center`. Used to evaluate curve-shaped landmarks (many ground
+    truth points per structure): the global argmax is meaningless when a
+    structure's heatmap has dozens of equally-high peaks along its length, so
+    each ground truth point is instead matched against the model's response
+    in its own local neighbourhood.
+    """
+    size = heatmap.shape[0]
+    cx, cy = center
+    x0, x1 = max(0, int(cx - window)), min(size, int(cx + window) + 1)
+    y0, y1 = max(0, int(cy - window)), min(size, int(cy + window) + 1)
+    patch = heatmap[y0:y1, x0:x1]
+    if patch.size == 0:
+        return center
+    ly, lx = np.unravel_index(np.argmax(patch), patch.shape)
+    return float(x0 + lx), float(y0 + ly)
+
+
 def radial_error_mm(pred_xy: tuple[float, float], gt_xy: tuple[float, float], mm_per_pixel: float = 0.27) -> float:
     """Euclidean distance between predicted and ground-truth landmark peaks, in mm."""
     dx = pred_xy[0] - gt_xy[0]

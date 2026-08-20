@@ -2,11 +2,15 @@ End-to-End Execution Runbook
 0. Setup (one-time)
 
 cd services/inference
+python -m venv .venv
+.venv\Scripts\Activate.ps1        # PowerShell. Use .venv/bin/activate on macOS/Linux.
 pip install -r requirements.txt
-This installs ultralytics, torch, torchvision, opencv-python-headless, etc. Confirm GPU is visible if you have one:
+This installs ultralytics, torch, torchvision, opencv-python-headless, etc. into a dedicated virtualenv, isolated from any other Python tools (e.g. streamlit, label-studio-sdk) that may be installed system-wide — mixing them can produce unresolvable dependency conflicts (protobuf versions in particular). Confirm GPU is visible if you have one:
 
 
-python3 -c "import torch; print(torch.cuda.is_available())"
+python -c "import torch; print(torch.cuda.is_available())"
+
+Every `python3`/`python`/`uvicorn` command in this runbook assumes `.venv` is activated in your current shell. If you open a new terminal, re-activate it first (`services/inference/.venv/Scripts/Activate.ps1`) — otherwise commands like `train_quadrant_pretrain.py` will fail with `ModuleNotFoundError: No module named 'ultralytics'` because they're running against the system Python instead.
 1. Prepare Stage 1 data (tooth detection, 32 FDI classes)
 Converts DENTEX's quadrant_enumeration COCO subset into a CLAHE + letterboxed 640×640 YOLO dataset.
 
@@ -76,6 +80,9 @@ The inference service reads from separate paths (not runs/), controlled by env v
 export TOOTH_DETECTION_CHECKPOINT=services/inference/training/runs/stage1/train/weights/best.pt
 export PATHOLOGY_CLASSIFIER_CHECKPOINT=services/inference/training/runs/stage2a/best.pt
 export PATHOLOGY_CLASSIFIER_CLASSES=services/inference/training/runs/stage2a/classes.json
+export LANDMARK_CHECKPOINT=services/inference/training/runs/stage2b/best.pt
+export LANDMARK_BASE_FILTERS=16
+LANDMARK_BASE_FILTERS must match whatever --base-filters value was passed to train_landmark_regression.py for that checkpoint (defaults to 32 if you didn't override it).
 Then start the service:
 
 
@@ -89,7 +96,7 @@ curl -X POST localhost:8000/v1/infer -H "Content-Type: application/json" -d '{
   "image_url": "https://.../opg.png",
   "model": "full_assessment"
 }'
-"model": "tooth_detection" runs Stage 1 only; "full_assessment" runs Stage 1 → Stage 2A composed, returning per-tooth fdi_number, bbox, pathology, pathology_confidence, plus missing_teeth.
+"model": "tooth_detection" runs Stage 1 only. "landmarks" runs Stage 2B only, returning bone_crest/sinus_floor/nerve_canal as lists of [x, y] points normalized 0-1 (same schema as datasets/landmarks). "full_assessment" runs Stage 1 → Stage 2A → Stage 2B composed, returning per-tooth fdi_number, bbox, pathology, pathology_confidence, missing_teeth, plus landmarks.
 
 Notes
 Steps 3–4 and 5–6 are independent of each other — you can run the 2A pipeline (5–6) in parallel with or before Stage 1 (3–4) if you want.
@@ -113,3 +120,19 @@ If Label Studio stores images itself (local/uploaded storage, not external URLs)
 Tune sensitivity with LS_CONFIDENCE_THRESHOLD (default 0.25) — lower surfaces more (noisier) boxes to correct, higher surfaces fewer but more confident ones.
 Tested locally against a real dataset image (datasets/Dentex/yolo/images/test/train_101.png) via curl — predictions returned correct percentage-based boxes and FDI labels.
 After labeling more data with this assist, re-run datasets/Dentex/import_label_studio_export.py to fold the new labels into the training set.
+
+10. Auto-labeling in Label Studio via the Stage 2B model
+Same idea as step 9, but for landmark curves (bone_crest/sinus_floor/nerve_canal) instead of tooth boxes — pre-labels each structure as a set of KeyPointLabels traced along the model's predicted heatmap so future annotation rounds start from a draft to correct rather than a blank image.
+
+cd services/inference
+LANDMARK_CHECKPOINT=training/runs/stage2b/best.pt LANDMARK_BASE_FILTERS=16 \
+    uvicorn landmark_ml_backend:app --host 0.0.0.0 --port 9091
+In Label Studio: Settings -> Model -> Connect Model -> URL http://localhost:9091.
+Your project's KeyPointLabels config must be named "bone_crest", "sinus_floor", "nerve_canal" to match this model's output channels.
+LANDMARK_BASE_FILTERS must match the checkpoint's training config (same caveat as step 8).
+Points are extracted from local maxima of the predicted heatmap (skimage.feature.peak_local_max, min_distance=8px, threshold_abs=0.5 — tune via LANDMARK_PEAK_THRESHOLD) rather than a single global peak, since these structures are curves with many points, not single landmarks.
+If Label Studio stores images itself (local/uploaded storage), set LABEL_STUDIO_URL and LABEL_STUDIO_ACCESS_TOKEN as in step 9.
+Tested locally against a real dataset image (datasets/landmarks/images/train_36.png) — returned 15-29 points per structure with plausible spatial distribution.
+After labeling more data with this assist, re-run datasets/landmarks/import_label_studio_export.py to fold the new labels into the training set.
+
+Note on Stage 2B's val MRE metric: evaluate_mre in train_landmark_regression.py scores each ground-truth curve point against the nearest local heatmap peak within LOCAL_PEAK_WINDOW (6px on the 640px canvas). This window must stay well under the ~10px spacing between adjacent ground-truth points (skimage skeleton sampling) — an earlier version used a 25px window, which let the search drift onto a neighbouring point on the same curve and produced a meaningless ~65mm reading. If you see val_mre_mm stuck flat regardless of training changes, suspect this window before suspecting the model.

@@ -8,14 +8,15 @@ Next.js -> Convex Mutation -> Inference Queue -> this service -> Convex -> Next.
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from inference import PathologyClassificationPipeline, ToothDetectionPipeline
+from inference import LandmarkRegressionPipeline, PathologyClassificationPipeline, ToothDetectionPipeline
 
 app = FastAPI(title="Dental AI Inference Service", version="0.1.0")
 
 _tooth_pipeline = ToothDetectionPipeline()
 _pathology_pipeline = PathologyClassificationPipeline()
+_landmark_pipeline = LandmarkRegressionPipeline()
 
-SUPPORTED_MODELS = {"tooth_detection", "full_assessment"}
+SUPPORTED_MODELS = {"tooth_detection", "full_assessment", "landmarks"}
 
 
 class InferenceRequest(BaseModel):
@@ -39,6 +40,7 @@ class InferenceResponse(BaseModel):
     model: str
     detections: list[DetectionResult]
     missing_teeth: list[str]
+    landmarks: dict[str, list[list[float]]] | None = None
 
 
 @app.get("/health")
@@ -51,13 +53,20 @@ def infer(req: InferenceRequest) -> InferenceResponse:
     if req.model not in SUPPORTED_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {req.model}")
 
+    landmarks = None
+
     if req.model == "tooth_detection":
         result = _tooth_pipeline.run(req.image_url)
         detections = result["detections"]
         missing_teeth = result["missing_teeth"]
-    else:  # full_assessment: tooth detection + per-tooth pathology classification
+    elif req.model == "landmarks":
+        detections = []
+        missing_teeth = []
+        landmarks = _landmark_pipeline.run(req.image_url)
+    else:  # full_assessment: tooth detection + pathology classification + landmarks
         raw_detections, missing_teeth, image = _tooth_pipeline.run_with_image(req.image_url)
         detections = _pathology_pipeline.classify_crops(image, raw_detections)
+        landmarks = _landmark_pipeline.run(req.image_url)
 
     return InferenceResponse(
         job_id=req.job_id,
@@ -65,4 +74,5 @@ def infer(req: InferenceRequest) -> InferenceResponse:
         model=req.model,
         detections=[DetectionResult(**d) for d in detections],
         missing_teeth=missing_teeth,
+        landmarks=landmarks,
     )
