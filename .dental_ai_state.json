@@ -14,7 +14,7 @@
   "stage2a": {
     "complete": true,
     "checkpoint": "runs\\stage2a\\best.pt",
-    "macro_auc": 0.846973892051355,
-    "completed_at": "2026-08-20T16:54:40.045562+00:00"
+    "macro_auc": 0.904550709871395,
+    "completed_at": "2026-08-21T02:10:07.229872+00:00"
   }
 }

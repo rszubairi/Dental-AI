@@ -35,7 +35,20 @@ LEARNING_RATE = 1e-4
 FINAL_LR = 1e-6
 
 
-def build_transforms() -> transforms.Compose:
+def build_train_transforms() -> transforms.Compose:
+    return transforms.Compose(
+        [
+            transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomRotation(degrees=10),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
+
+def build_eval_transforms() -> transforms.Compose:
     return transforms.Compose(
         [
             transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
@@ -122,10 +135,9 @@ def main() -> None:
         return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tfm = build_transforms()
 
-    train_ds = datasets.ImageFolder(str(Path(args.data) / "train"), transform=tfm)
-    val_ds = datasets.ImageFolder(str(Path(args.data) / "val"), transform=tfm)
+    train_ds = datasets.ImageFolder(str(Path(args.data) / "train"), transform=build_train_transforms())
+    val_ds = datasets.ImageFolder(str(Path(args.data) / "val"), transform=build_eval_transforms())
     assert set(train_ds.classes) == set(CLASSES), f"Expected class folders {CLASSES}, found {train_ds.classes}"
     assert train_ds.classes == val_ds.classes, (
         f"train/val class folder sets differ: {train_ds.classes} vs {val_ds.classes}"
