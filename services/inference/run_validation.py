@@ -28,18 +28,25 @@ def main() -> None:
     parser.add_argument("--images-url", required=True, help="Base URL serving that same folder over HTTP")
     parser.add_argument("--out", default="validation_log.jsonl")
     parser.add_argument("--model", default="full_assessment")
+    parser.add_argument("--limit", type=int, default=None, help="Only process N images (sorted order)")
+    parser.add_argument("--offset", type=int, default=0, help="Skip the first N images (sorted order)")
+    parser.add_argument("--append", action="store_true", help="Append to --out instead of overwriting it")
     args = parser.parse_args()
 
     images_dir = Path(args.images_dir)
     image_files = sorted(images_dir.glob("*.png"))
-    print(f"Found {len(image_files)} images under {images_dir}")
+    if args.offset:
+        image_files = image_files[args.offset :]
+    if args.limit:
+        image_files = image_files[: args.limit]
+    print(f"Found {len(image_files)} images under {images_dir} (offset={args.offset})")
 
     pathology_counts: Counter[str] = Counter()
     detection_counts: list[int] = []
     missing_counts: list[int] = []
     errors: list[tuple[str, str]] = []
 
-    with open(args.out, "w", encoding="utf-8") as log:
+    with open(args.out, "a" if args.append else "w", encoding="utf-8") as log:
         for i, img_path in enumerate(image_files, start=1):
             image_url = f"{args.images_url.rstrip('/')}/{img_path.name}"
             payload = {
