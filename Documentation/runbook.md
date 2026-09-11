@@ -48,6 +48,7 @@ Same auto-skip/--reset-step behavior.
 cd ../../../datasets/dentex
 python3 prepare_stage2a_dataset.py --dentex-root . --out stage2a
 Produces datasets/dentex/stage2a/{train,val}/{healthy,caries,deep_caries,periapical_lesion,impacted}/*.png (2858/698 crops, image-level split).
+Includes a boundary-gradient check on every disease annotation: dentist review found some "caries" labels were actually natural tooth shading (a gradual color transition) rather than a true cavity (a sharp intensity edge). Annotations whose boundary doesn't look sharp enough are relabeled "healthy" instead of trusting the raw DENTEX label. Tune via --min-boundary-sharpness (default 0.15 — NOT calibrated against real dentist-reviewed cases yet) and --dilate-px (ring width examined outside the annotation, default 6px). Every relabel decision is logged to stage2a/boundary_gradient_report.json — review a sample of these against dentist judgment to pick a better threshold.
 
 6. Train Stage 2A: EfficientNet-B3 pathology classifier
 
