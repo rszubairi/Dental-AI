@@ -73,10 +73,13 @@ class ToothDetectionPipeline:
     def run_with_image(self, image_url: str) -> tuple[list[dict], list[str], np.ndarray]:
         """Same as run(), but also returns the normalized image so callers (e.g. the
         pathology classifier) can extract crops without re-downloading/re-decoding."""
+        raw_bytes = httpx.get(image_url, timeout=30.0).content
+        return self.run_with_image_bytes(raw_bytes, filename=image_url)
+
+    def run_with_image_bytes(self, raw_bytes: bytes, filename: str) -> tuple[list[dict], list[str], np.ndarray]:
         model = self._load_model()
 
-        raw_bytes = httpx.get(image_url, timeout=30.0).content
-        image = load_image(raw_bytes, filename=image_url)
+        image = load_image(raw_bytes, filename=filename)
         normalized = normalize_for_model(image)
 
         results = model.predict(normalized, verbose=False)[0]
@@ -203,14 +206,17 @@ class LandmarkRegressionPipeline:
         return self._model
 
     def run(self, image_url: str, headers: dict[str, str] | None = None) -> dict[str, list[list[float]]]:
+        response = httpx.get(image_url, headers=headers, timeout=30.0)
+        response.raise_for_status()
+        return self.run_with_image_bytes(response.content, filename=image_url)
+
+    def run_with_image_bytes(self, raw_bytes: bytes, filename: str) -> dict[str, list[list[float]]]:
         import torch
         from skimage.feature import peak_local_max
 
         model = self._load_model()
 
-        response = httpx.get(image_url, headers=headers, timeout=30.0)
-        response.raise_for_status()
-        gray = load_image(response.content, filename=image_url)
+        gray = load_image(raw_bytes, filename=filename)
 
         enhanced = apply_clahe(gray)
         canvas = cv2.resize(enhanced, (LANDMARK_CANVAS_SIZE, LANDMARK_CANVAS_SIZE), interpolation=cv2.INTER_LINEAR)

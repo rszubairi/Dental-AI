@@ -11,4 +11,5 @@ pydicom==3.0.2
 python-multipart==0.0.32
 httpx==0.28.1
 scikit-image==0.26.0
+huggingface_hub==0.38.1
 pytest==9.1.1
