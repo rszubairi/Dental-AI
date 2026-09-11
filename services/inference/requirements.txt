@@ -12,4 +12,6 @@ python-multipart==0.0.32
 httpx==0.28.1
 scikit-image==0.26.0
 huggingface_hub==0.38.1
+scikit-learn==1.7.2
+matplotlib==3.10.6
 pytest==9.1.1

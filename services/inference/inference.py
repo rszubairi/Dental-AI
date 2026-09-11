@@ -30,6 +30,12 @@ PATHOLOGY_CLASSES_PATH = os.environ.get(
 )
 PATHOLOGY_CROP_SIZE = 128
 PATHOLOGY_CROP_PADDING = 0.2
+# A pathology class (caries/deep_caries/periapical_lesion/impacted) is only reported
+# when its softmax probability clears this bar; otherwise the tooth is reported as
+# "healthy" instead of a low-confidence argmax call. Raise this if dentist review finds
+# too many false positives (healthy teeth flagged as pathology); lower it if too many
+# real pathology cases are being suppressed to "healthy".
+PATHOLOGY_CONFIDENCE_THRESHOLD = float(os.environ.get("PATHOLOGY_CONFIDENCE_THRESHOLD", "0.6"))
 
 LANDMARK_CHECKPOINT_PATH = os.environ.get(
     "LANDMARK_CHECKPOINT", "models/landmark_regression/weights/best.pt"
@@ -164,6 +170,16 @@ class PathologyClassificationPipeline:
             with torch.no_grad():
                 probs = torch.softmax(model(tensor), dim=1)[0].cpu().numpy()
             class_idx = int(probs.argmax())
+
+            # Only report a pathology class when the model clears the confidence bar;
+            # an unsure call (e.g. 34% caries vs 33% healthy) falls back to "healthy"
+            # rather than being reported as a confident-looking pathology finding.
+            if (
+                self._classes[class_idx] != "healthy"
+                and probs[class_idx] < PATHOLOGY_CONFIDENCE_THRESHOLD
+                and "healthy" in self._classes
+            ):
+                class_idx = self._classes.index("healthy")
 
             results.append(
                 {

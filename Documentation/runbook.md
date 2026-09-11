@@ -54,7 +54,7 @@ Produces datasets/dentex/stage2a/{train,val}/{healthy,caries,deep_caries,periapi
 cd ../../services/inference/training
 python3 train_pathology_classifier.py --data ../../../datasets/dentex/stage2a
 50 epochs, patience 15, AdamW, class-weighted CrossEntropyLoss.
-Outputs runs/stage2a/best.pt, last.pt, classes.json.
+Outputs runs/stage2a/best.pt, last.pt, classes.json, plus (at every new best-checkpoint) confusion_matrix.png and classification_report.json — use these to check per-class precision/recall, especially "healthy" recall, since that's the rate at which healthy teeth get wrongly flagged as pathology (the failure mode dentist review has flagged as a false-positive problem). Macro AUC can look fine while this is poor, since AUC doesn't reflect the argmax decision boundary actually used at inference.
 Target: macro AUC-ROC ≥ 0.85.
 7. Stage 2B — blocked until you have client data
 Collect ≥200 annotated OPGs per datasets/landmarks/README.md's format (images/*.png + annotations/*.json with bone_crest/sinus_floor/nerve_canal normalized point lists).
@@ -83,6 +83,9 @@ export PATHOLOGY_CLASSIFIER_CLASSES=services/inference/training/runs/stage2a/cla
 export LANDMARK_CHECKPOINT=services/inference/training/runs/stage2b/best.pt
 export LANDMARK_BASE_FILTERS=16
 LANDMARK_BASE_FILTERS must match whatever --base-filters value was passed to train_landmark_regression.py for that checkpoint (defaults to 32 if you didn't override it).
+
+export PATHOLOGY_CONFIDENCE_THRESHOLD=0.6
+Pathology predictions (caries/deep_caries/periapical_lesion/impacted) below this softmax confidence fall back to "healthy" instead of being reported, to cut down false positives on borderline/unsure calls. Defaults to 0.6 if unset. Raise it if dentist review still finds too many healthy teeth flagged as pathology; lower it if real pathology cases are being suppressed to "healthy" too often. Tune using the classification_report.json / confusion_matrix.png from step 6 as a starting point, then validate against dentist feedback on actual predictions.
 Then start the service:
 
 

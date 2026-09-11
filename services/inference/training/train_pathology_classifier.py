@@ -16,8 +16,13 @@ import argparse
 import json
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from sklearn.metrics import ConfusionMatrixDisplay, classification_report, confusion_matrix
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
@@ -94,7 +99,10 @@ def _macro_auc(labels: np.ndarray, probs: np.ndarray) -> float:
     return float(np.mean(aucs)) if aucs else 0.0
 
 
-def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> float:
+def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[float, np.ndarray, np.ndarray]:
+    """Returns (macro AUC, val labels, val probs) so callers can also derive
+    argmax-based diagnostics (confusion matrix, precision/recall/F1) without a
+    second forward pass."""
     model.eval()
     all_probs, all_labels = [], []
     with torch.no_grad():
@@ -106,7 +114,33 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> floa
 
     probs = np.concatenate(all_probs)
     labels = np.concatenate(all_labels)
-    return _macro_auc(labels, probs)
+    return _macro_auc(labels, probs), labels, probs
+
+
+def save_diagnostics(
+    labels: np.ndarray, probs: np.ndarray, class_names: list[str], out_dir: Path
+) -> dict:
+    """Saves a confusion matrix plot + a precision/recall/F1 classification report for
+    the model's plain-argmax decisions, so class bias (e.g. over-predicting caries on
+    healthy teeth) is visible instead of hidden behind macro AUC alone."""
+    preds = probs.argmax(axis=1)
+
+    report = classification_report(
+        labels, preds, labels=list(range(len(class_names))), target_names=class_names,
+        output_dict=True, zero_division=0,
+    )
+    with open(out_dir / "classification_report.json", "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+
+    cm = confusion_matrix(labels, preds, labels=list(range(len(class_names))))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+    fig, ax = plt.subplots(figsize=(7, 7))
+    disp.plot(ax=ax, xticks_rotation=45, cmap="Blues", colorbar=False)
+    fig.tight_layout()
+    fig.savefig(out_dir / "confusion_matrix.png")
+    plt.close(fig)
+
+    return report
 
 
 def main() -> None:
@@ -160,6 +194,7 @@ def main() -> None:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=FINAL_LR)
 
     best_auc = -1.0
+    best_report: dict = {}
     epochs_without_improvement = 0
 
     for epoch in range(1, args.epochs + 1):
@@ -174,7 +209,7 @@ def main() -> None:
             running_loss += loss.item() * images.size(0)
         scheduler.step()
 
-        val_auc = evaluate(model, val_loader, device)
+        val_auc, val_labels, val_probs = evaluate(model, val_loader, device)
         avg_loss = running_loss / len(train_ds)
         print(f"epoch {epoch}/{args.epochs} loss={avg_loss:.4f} val_macro_auc={val_auc:.4f}")
 
@@ -184,6 +219,7 @@ def main() -> None:
             best_auc = val_auc
             epochs_without_improvement = 0
             torch.save(model.state_dict(), out_dir / "best.pt")
+            best_report = save_diagnostics(val_labels, val_probs, train_ds.classes, out_dir)
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= args.patience:
@@ -191,6 +227,12 @@ def main() -> None:
                 break
 
     print(f"Best val macro AUC-ROC: {best_auc:.4f}")
+    if "healthy" in best_report:
+        healthy_recall = best_report["healthy"]["recall"]
+        print(
+            f"Best-checkpoint 'healthy' recall: {healthy_recall:.4f} "
+            "(1 - this is the rate at which healthy teeth are wrongly flagged as pathology)"
+        )
     mark_step_complete(STEP_NAME, str(out_dir / "best.pt"), "macro_auc", best_auc)
 
 
