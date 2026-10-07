@@ -51,7 +51,10 @@ def reset_step(step_name: str, output_dir: Path) -> None:
     that turns out worse (or crashes) permanently loses the previous best
     checkpoint with no way to recover it."""
     state = load_state()
-    prev_metric = {k: v for k, v in state.get(step_name, {}).items() if k not in ("complete", "checkpoint", "completed_at")}
+    prev_metric = {
+        k: v for k, v in state.get(step_name, {}).items()
+        if k not in ("complete", "checkpoint", "completed_at", "note")
+    }
     if step_name in state:
         del state[step_name]
         save_state(state)

@@ -11,17 +11,16 @@
     "map50": 0.995,
     "completed_at": "2026-09-11T14:53:36.633863+00:00"
   },
-  "stage2a": {
-    "complete": true,
-    "checkpoint": "runs\\stage2a\\best.pt",
-    "macro_auc": 0.9159368445564888,
-    "completed_at": "2026-09-12T00:18:00+00:00",
-    "note": "boundary-gradient relabeling (min-boundary-sharpness) tried and reverted -- made every class worse without dentist-validated ground truth; restored from runs/archive"
-  },
   "stage2b": {
     "complete": true,
     "checkpoint": "runs\\stage2b\\best.pt",
     "mre_mm": 1.5104597255758905,
     "completed_at": "2026-09-11T19:33:33.104117+00:00"
+  },
+  "stage2a": {
+    "complete": true,
+    "checkpoint": "runs\\stage2a\\best.pt",
+    "macro_auc": 0.8266011841179581,
+    "completed_at": "2026-10-07T17:07:20.856285+00:00"
   }
 }
