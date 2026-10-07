@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 
-import cv2
 import numpy as np
 import pydicom
 from PIL import Image
@@ -29,9 +28,3 @@ def _load_dicom(raw: bytes) -> np.ndarray:
 def _load_standard(raw: bytes) -> np.ndarray:
     image = Image.open(io.BytesIO(raw)).convert("L")
     return np.array(image)
-
-
-def normalize_for_model(image: np.ndarray, target_size: tuple[int, int] = (1024, 1024)) -> np.ndarray:
-    resized = cv2.resize(image, target_size, interpolation=cv2.INTER_LINEAR)
-    equalized = cv2.equalizeHist(resized)
-    return equalized

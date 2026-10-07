@@ -3,3 +3,5 @@ datasets/
 venv/
 __pycache__/
 *.pyc
+services/inference/.env
+services/inference/openai_label_studio_predictions.jsonl

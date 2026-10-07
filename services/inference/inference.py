@@ -16,8 +16,8 @@ import numpy as np
 
 from postprocessing.fdi_mapping import index_to_fdi
 from postprocessing.missing_tooth import find_missing_teeth
-from preprocessing.image_loader import load_image, normalize_for_model
-from preprocessing.training_transforms import apply_clahe, extract_crop, to_rgb
+from preprocessing.image_loader import load_image
+from preprocessing.training_transforms import apply_clahe, extract_crop, letterbox, to_rgb
 
 MODEL_CHECKPOINT_PATH = os.environ.get(
     "TOOTH_DETECTION_CHECKPOINT", "models/tooth_detection/weights/best.pt"
@@ -28,6 +28,12 @@ PATHOLOGY_CHECKPOINT_PATH = os.environ.get(
 PATHOLOGY_CLASSES_PATH = os.environ.get(
     "PATHOLOGY_CLASSIFIER_CLASSES", "models/pathology_classifier/weights/classes.json"
 )
+DETECTION_CANVAS_SIZE = 640  # must match train_tooth_detection.py's --imgsz / dataset prep target_size
+# Ultralytics' own predict() default. Boxes below this confidence aren't returned at
+# all. Raise it to cut false positives / near-duplicate boxes in crowded or noisy
+# regions (at the cost of dropping genuine low-confidence detections); lower it to
+# surface more candidate boxes for review.
+DETECTION_CONFIDENCE_THRESHOLD = float(os.environ.get("DETECTION_CONFIDENCE_THRESHOLD", "0.25"))
 PATHOLOGY_CROP_SIZE = 128
 PATHOLOGY_CROP_PADDING = 0.2
 # A pathology class (caries/deep_caries/periapical_lesion/impacted) is only reported
@@ -86,23 +92,42 @@ class ToothDetectionPipeline:
         model = self._load_model()
 
         image = load_image(raw_bytes, filename=filename)
-        normalized = normalize_for_model(image)
 
-        results = model.predict(normalized, verbose=False)[0]
+        # Must mirror preprocessing/training_transforms.py's preprocess_for_training
+        # (CLAHE -> aspect-preserving letterbox -> RGB), the exact pipeline the
+        # checkpoint was trained on (see prepare_stage1_dataset.py and
+        # label_studio_ml_backend.py, which already does this correctly). A plain
+        # stretch-to-square resize distorts a panoramic X-ray's ~2:1 aspect ratio
+        # in a way the model never saw during training, causing missed/misplaced
+        # detections.
+        enhanced = apply_clahe(image)
+        canvas, scale, pad_left, pad_top = letterbox(enhanced, target_size=DETECTION_CANVAS_SIZE)
+        rgb = to_rgb(canvas)
+
+        results = model.predict(rgb, verbose=False, conf=DETECTION_CONFIDENCE_THRESHOLD)[0]
 
         detections: list[dict] = []
         for box in results.boxes:
             class_index = int(box.cls.item())
+            # Undo the letterbox: canvas coords -> original image pixel coords.
+            cx1, cy1, cx2, cy2 = [float(v) for v in box.xyxy[0].tolist()]
+            x1 = (cx1 - pad_left) / scale
+            y1 = (cy1 - pad_top) / scale
+            x2 = (cx2 - pad_left) / scale
+            y2 = (cy2 - pad_top) / scale
             detections.append(
                 {
                     "fdi_number": index_to_fdi(class_index),
-                    "bbox": [float(v) for v in box.xyxy[0].tolist()],
+                    "bbox": [x1, y1, x2, y2],
                     "confidence": float(box.conf.item()),
                 }
             )
 
         missing_teeth = find_missing_teeth([d["fdi_number"] for d in detections])
-        return detections, missing_teeth, normalized
+        # Return the original full-resolution image, not the stretched detection
+        # canvas -- bboxes above are already rescaled to this image's pixel space,
+        # and downstream pathology crops should come from full-res pixels anyway.
+        return detections, missing_teeth, image
 
 
 class PathologyClassificationPipeline:
