@@ -1,4 +1,33 @@
-datasets/
+# Small sample of DENTEX validation X-rays is carved out below and committed,
+# so the Streamlit Cloud deployment's "Validation set" picker has something to
+# show (the full dataset itself stays untracked -- see streamlit_app.py's
+# VALIDATION_DIR). Each level below excludes only its *children* (not the
+# directory itself), since Git won't recurse into a directory that is itself
+# excluded -- see https://git-scm.com/docs/gitignore ("Git doesn't list
+# excluded directories for performance reasons...").
+datasets/*
+!datasets/dentex/
+datasets/dentex/*
+!datasets/dentex/validation_data/
+datasets/dentex/validation_data/*
+!datasets/dentex/validation_data/validation_data/
+datasets/dentex/validation_data/validation_data/*
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/
+datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/*
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/
+datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/*
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_0.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_4.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_8.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_12.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_16.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_20.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_24.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_28.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_32.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_36.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_40.png
+!datasets/dentex/validation_data/validation_data/quadrant_enumeration_disease/xrays/val_44.png
 .venv/
 venv/
 __pycache__/
