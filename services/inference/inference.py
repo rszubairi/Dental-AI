@@ -16,6 +16,7 @@ import numpy as np
 
 from postprocessing.fdi_mapping import index_to_fdi
 from postprocessing.missing_tooth import find_missing_teeth
+from postprocessing.overlap_dedup import deduplicate_overlapping_detections
 from preprocessing.image_loader import load_image
 from preprocessing.training_transforms import apply_clahe, extract_crop, letterbox, to_rgb
 
@@ -34,6 +35,14 @@ DETECTION_CANVAS_SIZE = 640  # must match train_tooth_detection.py's --imgsz / d
 # regions (at the cost of dropping genuine low-confidence detections); lower it to
 # surface more candidate boxes for review.
 DETECTION_CONFIDENCE_THRESHOLD = float(os.environ.get("DETECTION_CONFIDENCE_THRESHOLD", "0.25"))
+# Ultralytics' predict() default (0.7) is too permissive for teeth: it only
+# suppresses duplicate boxes within the SAME predicted FDI class, and even then
+# lets boxes overlapping up to 70% coexist. Validation runs showed the same tooth
+# producing 2-3 near-identical boxes under one class at the default. Cross-class
+# duplicates (one tooth classified under two different neighboring FDI numbers,
+# which this threshold cannot touch since Ultralytics NMS never compares across
+# classes) are caught separately by postprocessing/overlap_dedup.py below.
+DETECTION_NMS_IOU_THRESHOLD = float(os.environ.get("DETECTION_NMS_IOU_THRESHOLD", "0.4"))
 PATHOLOGY_CROP_SIZE = 128
 PATHOLOGY_CROP_PADDING = 0.2
 # A pathology class (caries/deep_caries/periapical_lesion/impacted) is only reported
@@ -104,7 +113,9 @@ class ToothDetectionPipeline:
         canvas, scale, pad_left, pad_top = letterbox(enhanced, target_size=DETECTION_CANVAS_SIZE)
         rgb = to_rgb(canvas)
 
-        results = model.predict(rgb, verbose=False, conf=DETECTION_CONFIDENCE_THRESHOLD)[0]
+        results = model.predict(
+            rgb, verbose=False, conf=DETECTION_CONFIDENCE_THRESHOLD, iou=DETECTION_NMS_IOU_THRESHOLD
+        )[0]
 
         detections: list[dict] = []
         for box in results.boxes:
@@ -122,6 +133,15 @@ class ToothDetectionPipeline:
                     "confidence": float(box.conf.item()),
                 }
             )
+
+        # Guardrail: Ultralytics NMS above only suppresses duplicate boxes within the
+        # same predicted FDI class. It can't catch one physical tooth producing boxes
+        # classified under two different (neighboring) FDI numbers -- that requires
+        # comparing boxes across classes, which this does, keeping the highest-
+        # confidence box per physical tooth and per FDI site. See
+        # postprocessing/overlap_dedup.py for why this matters for missing-tooth
+        # accuracy specifically.
+        detections = deduplicate_overlapping_detections(detections)
 
         missing_teeth = find_missing_teeth([d["fdi_number"] for d in detections])
         # Return the original full-resolution image, not the stretched detection
