@@ -155,3 +155,51 @@ def extract_crop(
 
     crop = image[y0:y1, x0:x1]
     return cv2.resize(crop, (output_size, output_size), interpolation=cv2.INTER_LINEAR)
+
+
+def extract_crown_crop(
+    image: np.ndarray,
+    bbox_xywh: tuple[float, float, float, float],
+    fdi_number: str | None = None,
+    output_size: int = 256,
+) -> np.ndarray:
+    """Extract a crown-focused crop targeting enamel, dentin, and interproximal margins.
+    
+    In a panoramic radiograph:
+    - Maxillary teeth (quadrants 1 and 2): Crowns are at the bottom of the tooth bounding box.
+    - Mandibular teeth (quadrants 3 and 4): Crowns are at the top of the tooth bounding box.
+    - Focusing on the coronal 60% of the tooth eliminates confounding root canal fillings,
+      apical lesions, and maxillary sinus shadows from corrupting caries classification.
+    """
+    h, w = image.shape[:2]
+    x, y, bw, bh = bbox_xywh
+
+    # Determine if maxillary (quadrant 1 or 2) or mandibular (quadrant 3 or 4)
+    is_maxillary = True
+    if fdi_number and len(fdi_number) >= 2:
+        quadrant = fdi_number[0]
+        if quadrant in ("3", "4"):
+            is_maxillary = False
+    else:
+        # Fallback heuristic: check vertical position relative to image center
+        cy = y + bh / 2.0
+        is_maxillary = cy < (h / 2.0)
+
+    # Focus on the coronal 60% + horizontal margin for interproximal contacts
+    pad_x = bw * 0.15
+    x0 = max(0, int(x - pad_x))
+    x1 = min(w, int(x + bw + pad_x))
+
+    if is_maxillary:
+        # Crown is towards bottom of the tooth box
+        y0 = max(0, int(y + bh * 0.35))
+        y1 = min(h, int(y + bh * 1.05))
+    else:
+        # Crown is towards top of the tooth box
+        y0 = max(0, int(y - bh * 0.05))
+        y1 = min(h, int(y + bh * 0.65))
+
+    crop = image[y0:y1, x0:x1]
+    if crop.size == 0:
+        return extract_crop(image, bbox_xywh, padding_frac=0.1, output_size=output_size)
+    return cv2.resize(crop, (output_size, output_size), interpolation=cv2.INTER_LINEAR)

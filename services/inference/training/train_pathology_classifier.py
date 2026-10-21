@@ -37,13 +37,26 @@ BATCH_SIZE = 32
 EPOCHS = 50
 PATIENCE = 15
 LEARNING_RATE = 1e-4
-FINAL_LR = 1e-6
+class FocalLoss(nn.Module):
+    """Multi-class Focal Loss with gamma focusing to down-weight easy negatives (healthy teeth)
+    and focus gradient updates on hard lesions (subtle caries)."""
+
+    def __init__(self, gamma: float = 2.0, weight: torch.Tensor | None = None) -> None:
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        ce_loss = nn.functional.cross_entropy(inputs, targets, weight=self.weight, reduction="none")
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1.0 - pt) ** self.gamma) * ce_loss
+        return focal_loss.mean()
 
 
-def build_train_transforms() -> transforms.Compose:
+def build_train_transforms(input_size: int = INPUT_SIZE) -> transforms.Compose:
     return transforms.Compose(
         [
-            transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
+            transforms.Resize((input_size, input_size)),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomRotation(degrees=10),
             transforms.ColorJitter(brightness=0.2, contrast=0.2),
@@ -53,10 +66,10 @@ def build_train_transforms() -> transforms.Compose:
     )
 
 
-def build_eval_transforms() -> transforms.Compose:
+def build_eval_transforms(input_size: int = INPUT_SIZE) -> transforms.Compose:
     return transforms.Compose(
         [
-            transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
+            transforms.Resize((input_size, input_size)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -75,7 +88,9 @@ def compute_class_weights(dataset: datasets.ImageFolder, device: torch.device) -
     for _, label in dataset.samples:
         counts[label] += 1
     counts = counts.clamp(min=1)
-    weights = counts.sum() / (len(CLASSES) * counts)
+    # Smoothed class weighting (sqrt) to prevent extreme penalty on healthy class
+    weights = torch.sqrt(counts.sum() / counts)
+    weights = weights / weights.mean()
     return weights.to(device)
 
 
@@ -149,6 +164,9 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--patience", type=int, default=PATIENCE)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--input-size", type=int, default=INPUT_SIZE)
+    parser.add_argument("--use-focal", action="store_true", help="Use Focal Loss to reduce false positives")
+    parser.add_argument("--focal-gamma", type=float, default=2.0)
     parser.add_argument("--out", default="runs/stage2a")
     parser.add_argument(
         "--reset-step",
@@ -170,8 +188,12 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_ds = datasets.ImageFolder(str(Path(args.data) / "train"), transform=build_train_transforms())
-    val_ds = datasets.ImageFolder(str(Path(args.data) / "val"), transform=build_eval_transforms())
+    train_ds = datasets.ImageFolder(
+        str(Path(args.data) / "train"), transform=build_train_transforms(args.input_size)
+    )
+    val_ds = datasets.ImageFolder(
+        str(Path(args.data) / "val"), transform=build_eval_transforms(args.input_size)
+    )
     assert set(train_ds.classes) == set(CLASSES), f"Expected class folders {CLASSES}, found {train_ds.classes}"
     assert train_ds.classes == val_ds.classes, (
         f"train/val class folder sets differ: {train_ds.classes} vs {val_ds.classes}"
@@ -189,7 +211,11 @@ def main() -> None:
 
     model = build_model(device)
     class_weights = compute_class_weights(train_ds, device)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    if args.use_focal:
+        criterion = FocalLoss(gamma=args.focal_gamma, weight=class_weights)
+    else:
+        criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=FINAL_LR)
 
