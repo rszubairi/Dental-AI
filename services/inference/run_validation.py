@@ -64,6 +64,7 @@ def main() -> None:
 
                 detections = result.get("detections", [])
                 missing = result.get("missing_teeth", [])
+                uncertain = result.get("uncertain_teeth", [])
                 landmarks = result.get("landmarks") or {}
 
                 detection_counts.append(len(detections))
@@ -82,13 +83,14 @@ def main() -> None:
                             "landmark_point_counts": {k: len(v) for k, v in landmarks.items()},
                             "detections": detections,
                             "missing_teeth": missing,
+                            "uncertain_teeth": uncertain,
                             "landmarks": landmarks,
                         }
                     )
                     + "\n"
                 )
                 print(f"[{i}/{len(image_files)}] {img_path.name}: {len(detections)} teeth, "
-                      f"{len(missing)} missing, {elapsed:.1f}s")
+                      f"{len(missing)} missing, {len(uncertain)} uncertain, {elapsed:.1f}s")
             except Exception as exc:  # noqa: BLE001
                 errors.append((img_path.name, str(exc)))
                 log.write(json.dumps({"image": img_path.name, "error": str(exc)}) + "\n")

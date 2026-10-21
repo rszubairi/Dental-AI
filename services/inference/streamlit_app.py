@@ -251,14 +251,18 @@ def main() -> None:
         try:
             with st.spinner("Running inference..."):
                 if mode == "tooth_detection":
-                    detections, missing_teeth, image = tooth_pipeline.run_with_image_bytes(raw_bytes, filename)
+                    detections, missing_teeth, uncertain_teeth, image = tooth_pipeline.run_with_image_bytes(
+                        raw_bytes, filename
+                    )
                     landmarks = None
                 elif mode == "landmarks":
                     image = load_image(raw_bytes, filename=filename)
-                    detections, missing_teeth = [], []
+                    detections, missing_teeth, uncertain_teeth = [], [], []
                     landmarks = landmark_pipeline.run_with_image_bytes(raw_bytes, filename)
                 else:
-                    raw_detections, missing_teeth, image = tooth_pipeline.run_with_image_bytes(raw_bytes, filename)
+                    raw_detections, missing_teeth, uncertain_teeth, image = tooth_pipeline.run_with_image_bytes(
+                        raw_bytes, filename
+                    )
                     detections = pathology_pipeline.classify_crops(image, raw_detections)
                     landmarks = landmark_pipeline.run_with_image_bytes(raw_bytes, filename)
         except RuntimeError as exc:
@@ -268,6 +272,7 @@ def main() -> None:
         st.session_state["result"] = {
             "detections": detections,
             "missing_teeth": missing_teeth,
+            "uncertain_teeth": uncertain_teeth,
             "landmarks": landmarks,
             "image": image,
             "filename": filename,
@@ -287,6 +292,7 @@ def main() -> None:
 
     detections = result["detections"]
     missing_teeth = result["missing_teeth"]
+    uncertain_teeth = result.get("uncertain_teeth", [])
     landmarks = result["landmarks"]
     image = result["image"]
     filename = result["filename"]
@@ -320,11 +326,21 @@ def main() -> None:
         st.image(canvas_rgb, caption=filename, use_container_width=True)
 
     st.subheader("Summary")
-    metric_cols = st.columns(2)
+    metric_cols = st.columns(3)
     metric_cols[0].metric("Caries detected" if only_caries else "Teeth detected", len(detections))
     metric_cols[1].metric("Missing teeth (FDI)", len(missing_teeth))
+    metric_cols[2].metric("Uncertain sites (review)", len(uncertain_teeth))
     if missing_teeth:
-        st.write(", ".join(missing_teeth))
+        st.write("Likely missing: " + ", ".join(missing_teeth))
+    if uncertain_teeth:
+        reason_labels = {
+            "possible_numbering_error": "may be a neighbouring tooth numbered one position off",
+            "possible_detector_miss": "may be present but under-detected",
+        }
+        st.write(
+            "Uncertain: "
+            + ", ".join(f"{u['fdi_number']} ({reason_labels.get(u['reason'], u['reason'])})" for u in uncertain_teeth)
+        )
 
     selected_idx = st.session_state.get("selected_idx")
     if detections:
@@ -378,7 +394,14 @@ def main() -> None:
         st.write({name: len(points) for name, points in landmarks.items()})
 
     with st.expander("Raw JSON"):
-        st.json({"detections": detections, "missing_teeth": missing_teeth, "landmarks": landmarks})
+        st.json(
+            {
+                "detections": detections,
+                "missing_teeth": missing_teeth,
+                "uncertain_teeth": uncertain_teeth,
+                "landmarks": landmarks,
+            }
+        )
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ import httpx
 import numpy as np
 
 from postprocessing.fdi_mapping import index_to_fdi
-from postprocessing.missing_tooth import find_missing_teeth
+from postprocessing.missing_tooth import DETECTOR_MISS_MIN_CONFIDENCE, assess_missing_teeth
 from postprocessing.overlap_dedup import deduplicate_overlapping_detections
 from preprocessing.image_loader import load_image
 from preprocessing.training_transforms import apply_clahe, extract_crop, letterbox, to_rgb
@@ -35,6 +35,10 @@ DETECTION_CANVAS_SIZE = 640  # must match train_tooth_detection.py's --imgsz / d
 # regions (at the cost of dropping genuine low-confidence detections); lower it to
 # surface more candidate boxes for review.
 DETECTION_CONFIDENCE_THRESHOLD = float(os.environ.get("DETECTION_CONFIDENCE_THRESHOLD", "0.25"))
+# The model is queried down to this lower confidence so sub-threshold boxes can serve
+# as evidence for missing-tooth triage (postprocessing/missing_tooth.py). They are
+# never reported as detections.
+CANDIDATE_CONFIDENCE_FLOOR = min(DETECTION_CONFIDENCE_THRESHOLD, DETECTOR_MISS_MIN_CONFIDENCE)
 # Ultralytics' predict() default (0.7) is too permissive for teeth: it only
 # suppresses duplicate boxes within the SAME predicted FDI class, and even then
 # lets boxes overlapping up to 70% coexist. Validation runs showed the same tooth
@@ -88,16 +92,21 @@ class ToothDetectionPipeline:
         return self._model
 
     def run(self, image_url: str) -> dict:
-        detections, missing_teeth, _normalized_image = self.run_with_image(image_url)
-        return {"detections": detections, "missing_teeth": missing_teeth}
+        detections, missing_teeth, uncertain_teeth, _normalized_image = self.run_with_image(image_url)
+        return {"detections": detections, "missing_teeth": missing_teeth, "uncertain_teeth": uncertain_teeth}
 
-    def run_with_image(self, image_url: str) -> tuple[list[dict], list[str], np.ndarray]:
+    def run_with_image(self, image_url: str) -> tuple[list[dict], list[str], list[dict], np.ndarray]:
         """Same as run(), but also returns the normalized image so callers (e.g. the
         pathology classifier) can extract crops without re-downloading/re-decoding."""
         raw_bytes = httpx.get(image_url, timeout=30.0).content
         return self.run_with_image_bytes(raw_bytes, filename=image_url)
 
-    def run_with_image_bytes(self, raw_bytes: bytes, filename: str) -> tuple[list[dict], list[str], np.ndarray]:
+    def run_with_image_bytes(
+        self, raw_bytes: bytes, filename: str
+    ) -> tuple[list[dict], list[str], list[dict], np.ndarray]:
+        """Returns (detections, missing_teeth, uncertain_teeth, image). missing_teeth
+        holds only likely-missing sites; uncertain_teeth holds sites that may hold an
+        under-detected or misnumbered tooth, as {"fdi_number", "reason"}."""
         model = self._load_model()
 
         image = load_image(raw_bytes, filename=filename)
@@ -114,10 +123,11 @@ class ToothDetectionPipeline:
         rgb = to_rgb(canvas)
 
         results = model.predict(
-            rgb, verbose=False, conf=DETECTION_CONFIDENCE_THRESHOLD, iou=DETECTION_NMS_IOU_THRESHOLD
+            rgb, verbose=False, conf=CANDIDATE_CONFIDENCE_FLOOR, iou=DETECTION_NMS_IOU_THRESHOLD
         )[0]
 
         detections: list[dict] = []
+        candidates: list[dict] = []
         for box in results.boxes:
             class_index = int(box.cls.item())
             # Undo the letterbox: canvas coords -> original image pixel coords.
@@ -126,13 +136,12 @@ class ToothDetectionPipeline:
             y1 = (cy1 - pad_top) / scale
             x2 = (cx2 - pad_left) / scale
             y2 = (cy2 - pad_top) / scale
-            detections.append(
-                {
-                    "fdi_number": index_to_fdi(class_index),
-                    "bbox": [x1, y1, x2, y2],
-                    "confidence": float(box.conf.item()),
-                }
-            )
+            det = {
+                "fdi_number": index_to_fdi(class_index),
+                "bbox": [x1, y1, x2, y2],
+                "confidence": float(box.conf.item()),
+            }
+            (detections if det["confidence"] >= DETECTION_CONFIDENCE_THRESHOLD else candidates).append(det)
 
         # Guardrail: Ultralytics NMS above only suppresses duplicate boxes within the
         # same predicted FDI class. It can't catch one physical tooth producing boxes
@@ -143,11 +152,11 @@ class ToothDetectionPipeline:
         # accuracy specifically.
         detections = deduplicate_overlapping_detections(detections)
 
-        missing_teeth = find_missing_teeth([d["fdi_number"] for d in detections])
+        missing_teeth, uncertain_teeth = assess_missing_teeth(detections, candidates)
         # Return the original full-resolution image, not the stretched detection
         # canvas -- bboxes above are already rescaled to this image's pixel space,
         # and downstream pathology crops should come from full-res pixels anyway.
-        return detections, missing_teeth, image
+        return detections, missing_teeth, uncertain_teeth, image
 
 
 class PathologyClassificationPipeline:

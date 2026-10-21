@@ -34,12 +34,20 @@ class DetectionResult(BaseModel):
     pathology_confidence: float | None = None
 
 
+class UncertainToothSite(BaseModel):
+    fdi_number: str
+    reason: str  # "possible_numbering_error" | "possible_detector_miss"
+
+
 class InferenceResponse(BaseModel):
     job_id: str
     case_id: str
     model: str
     detections: list[DetectionResult]
     missing_teeth: list[str]
+    # Expected sites with no reported tooth, but where the detector saw weak evidence
+    # of one -- for dentist review, not to be treated as confirmed missing teeth.
+    uncertain_teeth: list[UncertainToothSite] = []
     landmarks: dict[str, list[list[float]]] | None = None
 
 
@@ -48,36 +56,43 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _run_model_on_url(model: str, image_url: str) -> tuple[list[dict], list[str], dict | None]:
+def _run_model_on_url(model: str, image_url: str) -> tuple[list[dict], list[str], list[dict], dict | None]:
     landmarks = None
     if model == "tooth_detection":
         result = _tooth_pipeline.run(image_url)
         detections = result["detections"]
         missing_teeth = result["missing_teeth"]
+        uncertain_teeth = result["uncertain_teeth"]
     elif model == "landmarks":
         detections = []
         missing_teeth = []
+        uncertain_teeth = []
         landmarks = _landmark_pipeline.run(image_url)
     else:  # full_assessment: tooth detection + pathology classification + landmarks
-        raw_detections, missing_teeth, image = _tooth_pipeline.run_with_image(image_url)
+        raw_detections, missing_teeth, uncertain_teeth, image = _tooth_pipeline.run_with_image(image_url)
         detections = _pathology_pipeline.classify_crops(image, raw_detections)
         landmarks = _landmark_pipeline.run(image_url)
-    return detections, missing_teeth, landmarks
+    return detections, missing_teeth, uncertain_teeth, landmarks
 
 
-def _run_model_on_bytes(model: str, raw_bytes: bytes, filename: str) -> tuple[list[dict], list[str], dict | None]:
+def _run_model_on_bytes(
+    model: str, raw_bytes: bytes, filename: str
+) -> tuple[list[dict], list[str], list[dict], dict | None]:
     landmarks = None
     if model == "tooth_detection":
-        detections, missing_teeth, _image = _tooth_pipeline.run_with_image_bytes(raw_bytes, filename)
+        detections, missing_teeth, uncertain_teeth, _image = _tooth_pipeline.run_with_image_bytes(raw_bytes, filename)
     elif model == "landmarks":
         detections = []
         missing_teeth = []
+        uncertain_teeth = []
         landmarks = _landmark_pipeline.run_with_image_bytes(raw_bytes, filename)
     else:  # full_assessment
-        raw_detections, missing_teeth, image = _tooth_pipeline.run_with_image_bytes(raw_bytes, filename)
+        raw_detections, missing_teeth, uncertain_teeth, image = _tooth_pipeline.run_with_image_bytes(
+            raw_bytes, filename
+        )
         detections = _pathology_pipeline.classify_crops(image, raw_detections)
         landmarks = _landmark_pipeline.run_with_image_bytes(raw_bytes, filename)
-    return detections, missing_teeth, landmarks
+    return detections, missing_teeth, uncertain_teeth, landmarks
 
 
 @app.post("/v1/infer", response_model=InferenceResponse)
@@ -85,7 +100,7 @@ def infer(req: InferenceRequest) -> InferenceResponse:
     if req.model not in SUPPORTED_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {req.model}")
 
-    detections, missing_teeth, landmarks = _run_model_on_url(req.model, req.image_url)
+    detections, missing_teeth, uncertain_teeth, landmarks = _run_model_on_url(req.model, req.image_url)
 
     return InferenceResponse(
         job_id=req.job_id,
@@ -93,6 +108,7 @@ def infer(req: InferenceRequest) -> InferenceResponse:
         model=req.model,
         detections=[DetectionResult(**d) for d in detections],
         missing_teeth=missing_teeth,
+        uncertain_teeth=[UncertainToothSite(**u) for u in uncertain_teeth],
         landmarks=landmarks,
     )
 
@@ -111,7 +127,7 @@ async def infer_upload(
         raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
 
     raw_bytes = await file.read()
-    detections, missing_teeth, landmarks = _run_model_on_bytes(model, raw_bytes, file.filename or "upload.png")
+    detections, missing_teeth, uncertain_teeth, landmarks = _run_model_on_bytes(model, raw_bytes, file.filename or "upload.png")
 
     return InferenceResponse(
         job_id=job_id,
@@ -119,5 +135,6 @@ async def infer_upload(
         model=model,
         detections=[DetectionResult(**d) for d in detections],
         missing_teeth=missing_teeth,
+        uncertain_teeth=[UncertainToothSite(**u) for u in uncertain_teeth],
         landmarks=landmarks,
     )
