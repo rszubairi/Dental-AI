@@ -97,7 +97,11 @@ class ToothDetectionPipeline:
         # Must match the canvas the checkpoint was trained on (dataset prep's
         # --target-size == training --imgsz): a 1024-trained model fed a 640 canvas
         # gets an upscaled, blurrier image and loses the resolution it was trained for.
-        self._canvas_size = int(self._model.overrides.get("imgsz", DETECTION_CANVAS_SIZE))
+        raw_imgsz = self._model.overrides.get("imgsz", DETECTION_CANVAS_SIZE)
+        if isinstance(raw_imgsz, (tuple, list)):
+            self._canvas_size = (int(raw_imgsz[0]), int(raw_imgsz[1]))
+        else:
+            self._canvas_size = int(raw_imgsz)
         return self._model
 
     def run(self, image_url: str) -> dict:

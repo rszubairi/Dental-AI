@@ -248,10 +248,34 @@ def main() -> None:
     st.title("Dental AI - Model Verification Viewer")
     st.caption("Run trained checkpoints against DENTEX validation images (or your own upload) for visual QA.")
 
+    with st.sidebar:
+        st.header("Settings")
+
+        # Stage 1 Checkpoint selection
+        available_stage1_checkpoints = {
+            "Enhanced (Rectangular 512x1024)": str(TRAINING_DIR / "runs/stage1_rect_v1/train/weights/best.pt"),
+            "Baseline (Square 640x640)": str(TRAINING_DIR / "runs/stage1/train/weights/best.pt"),
+        }
+        # Filter to only existing files
+        existing_checkpoints = {
+            name: path for name, path in available_stage1_checkpoints.items() if Path(path).exists()
+        }
+        if existing_checkpoints:
+            selected_ckpt_name = st.selectbox(
+                "Tooth Detection Checkpoint",
+                list(existing_checkpoints.keys()),
+                index=0,
+                help="Select which Stage 1 model weights to test",
+            )
+            chosen_ckpt_path = existing_checkpoints[selected_ckpt_name]
+            if inference.MODEL_CHECKPOINT_PATH != chosen_ckpt_path:
+                inference.MODEL_CHECKPOINT_PATH = chosen_ckpt_path
+                _load_pipelines.clear()
+                st.rerun()
+
     tooth_pipeline, pathology_pipeline, landmark_pipeline = _load_pipelines()
 
     with st.sidebar:
-        st.header("Settings")
         mode = st.radio(
             "Model",
             ["full_assessment", "tooth_detection", "landmarks"],
