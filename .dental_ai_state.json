@@ -29,5 +29,11 @@
     "checkpoint": "runs\\stage1\\train\\weights\\best.pt",
     "map50": 0.9669123095775942,
     "completed_at": "2026-10-19T18:37:01.769219+00:00"
+  },
+  "stage1_rect_v1": {
+    "complete": true,
+    "checkpoint": "services\\inference\\training\\runs\\stage1_rect_v1\\train\\weights\\best.pt",
+    "map50": 0.9635348093483531,
+    "completed_at": "2026-10-21T18:44:30.601619+00:00"
   }
 }

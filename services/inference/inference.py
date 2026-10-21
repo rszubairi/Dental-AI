@@ -14,6 +14,7 @@ import cv2
 import httpx
 import numpy as np
 
+from postprocessing.arch_graph_matcher import enforce_dental_arch_ordering
 from postprocessing.fdi_mapping import index_to_fdi
 from postprocessing.missing_tooth import DETECTOR_MISS_MIN_CONFIDENCE, assess_missing_teeth
 from postprocessing.overlap_dedup import deduplicate_overlapping_detections
@@ -163,6 +164,10 @@ class ToothDetectionPipeline:
         # postprocessing/overlap_dedup.py for why this matters for missing-tooth
         # accuracy specifically.
         detections = deduplicate_overlapping_detections(detections)
+
+        # Anatomical Guardrail: Enforce monotonic spatial ordering along the dental arch
+        # (eliminating quadrant inversions and false jumps, e.g., 11 vs 21 midline swaps).
+        detections = enforce_dental_arch_ordering(detections)
 
         missing_teeth, uncertain_teeth = assess_missing_teeth(detections, candidates)
         # Return the original full-resolution image, not the stretched detection

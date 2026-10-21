@@ -48,9 +48,11 @@ def main() -> None:
     parser.add_argument("--data", required=True, help="Path to YOLO dataset.yaml")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=20)
-    parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--imgsz", default="640", help="Canvas size: int (640) or 'h,w' ('512,1024')")
     parser.add_argument("--base-model", default="yolov8s.pt")
     parser.add_argument("--batch", type=int, default=None, help="Overrides VRAM auto-detection")
+    parser.add_argument("--box", type=float, default=8.5, help="Box regression loss weight (default 8.5, standard 7.5)")
+    parser.add_argument("--dfl", type=float, default=2.0, help="DFL loss weight (default 2.0, standard 1.5)")
     parser.add_argument("--project", default="runs/stage1")
     parser.add_argument(
         "--step-name",
@@ -77,13 +79,21 @@ def main() -> None:
 
     batch = args.batch if args.batch is not None else detect_batch_size()
 
+    if isinstance(args.imgsz, str) and "," in args.imgsz:
+        h_str, w_str = args.imgsz.split(",")
+        imgsz = (int(h_str.strip()), int(w_str.strip()))
+    else:
+        imgsz = int(args.imgsz)
+
     model = YOLO(args.base_model)
     model.train(
         data=args.data,
         epochs=args.epochs,
         patience=args.patience,
-        imgsz=args.imgsz,
+        imgsz=imgsz,
         batch=batch,
+        box=args.box,
+        dfl=args.dfl,
         project=args.project,
         name="train",
         save_period=5,
