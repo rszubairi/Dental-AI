@@ -59,7 +59,17 @@ def reset_step(step_name: str, output_dir: Path) -> None:
         del state[step_name]
         save_state(state)
 
+    # Two conventions exist among this repo's training scripts: a flat output dir
+    # (train_pathology_classifier.py, train_landmark_regression.py -- best.pt
+    # directly under output_dir) and Ultralytics' project/name/weights layout
+    # (train_tooth_detection.py, train_quadrant_pretrain.py, train_oralxrays9_pretrain.py
+    # -- best.pt under output_dir/train/weights/). Checking only the flat path here
+    # silently broke the archive-before-delete promise for every YOLO-based script:
+    # best_path.exists() was always False, so reset_step deleted the real checkpoint
+    # with no backup, twice, before this was caught.
     best_path = output_dir / "best.pt"
+    if not best_path.exists():
+        best_path = output_dir / "train" / "weights" / "best.pt"
     if best_path.exists():
         archive_dir = output_dir.parent / "archive"
         archive_dir.mkdir(parents=True, exist_ok=True)

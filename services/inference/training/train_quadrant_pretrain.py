@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
 import torch
@@ -82,8 +83,13 @@ def main() -> None:
         lrf=1e-5 / 1e-3,
         cos_lr=True,
         weight_decay=5e-4,
-        # Same conservative OPG augmentation policy as Stage 1.
-        fliplr=0.3,
+        # Same conservative OPG augmentation policy as Stage 1 (see
+        # train_tooth_detection.py's comment): quadrant labels (1=upper right,
+        # 2=upper left, 3=lower left, 4=lower right) are left/right-sensitive
+        # exactly like FDI numbers, so fliplr MUST stay 0 -- flipping without
+        # remapping the class teaches the backbone the same wrong left-right
+        # association that fine-tuning on Stage 1 data alone may not fully undo.
+        fliplr=0.0,
         flipud=0.0,
         degrees=5.0,
         translate=0.05,
@@ -94,7 +100,26 @@ def main() -> None:
         mosaic=0.0,
     )
 
-    best_checkpoint = project_dir / "train" / "weights" / "best.pt"
+    canonical_dir = project_dir / "train"
+    best_checkpoint = canonical_dir / "weights" / "best.pt"
+
+    # See train_tooth_detection.py's identical block for why this is needed:
+    # newer ultralytics versions insert a RUNS_DIR/<task>/ prefix in front of a
+    # relative `project=` path, which silently broke this path assumption and
+    # reset_step's archive-before-delete safety net.
+    actual_save_dir = model.trainer.save_dir
+    if actual_save_dir.resolve() != canonical_dir.resolve():
+        print(
+            f"Note: ultralytics saved outputs to {actual_save_dir} instead of the expected "
+            f"{canonical_dir}. Copying weights to the canonical location."
+        )
+        canonical_weights = canonical_dir / "weights"
+        canonical_weights.mkdir(parents=True, exist_ok=True)
+        for fname in ("best.pt", "last.pt"):
+            src = actual_save_dir / "weights" / fname
+            if src.exists():
+                shutil.copy2(src, canonical_weights / fname)
+
     val_map50 = 0.0
     try:
         metrics = model.val()

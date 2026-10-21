@@ -1,10 +1,4 @@
 {
-  "stage1": {
-    "complete": true,
-    "checkpoint": "runs\\stage1\\train\\weights\\best.pt",
-    "map50": 0.9542396520394292,
-    "completed_at": "2026-09-11T14:38:13.765522+00:00"
-  },
   "pretrain_quadrant": {
     "complete": true,
     "checkpoint": "runs\\pretrain_quadrant\\train\\weights\\best.pt",
@@ -17,10 +11,23 @@
     "mre_mm": 1.5104597255758905,
     "completed_at": "2026-09-11T19:33:33.104117+00:00"
   },
+  "pretrain_oralxrays9": {
+    "complete": true,
+    "checkpoint": "runs\\pretrain_oralxrays9\\train\\weights\\best.pt",
+    "map50": 0.9052659306836977,
+    "completed_at": "2026-10-19T17:00:54.503167+00:00"
+  },
   "stage2a": {
     "complete": true,
     "checkpoint": "runs\\stage2a\\best.pt",
     "macro_auc": 0.8776566797416521,
-    "completed_at": "2026-10-13T11:15:42.227846+00:00"
+    "completed_at": "2026-10-19T17:31:07+00:00",
+    "note": "reverted to pre-oralxrays9-experiment baseline; backbone/caries-merge/sharpened-merge experiments all underperformed this"
+  },
+  "stage1": {
+    "complete": true,
+    "checkpoint": "runs\\stage1\\train\\weights\\best.pt",
+    "map50": 0.9669123095775942,
+    "completed_at": "2026-10-19T18:37:01.769219+00:00"
   }
 }

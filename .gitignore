@@ -34,3 +34,11 @@ __pycache__/
 *.pyc
 services/inference/.env
 services/inference/openai_label_studio_predictions.jsonl
+
+# Training outputs: only the best.pt checkpoints that inference loads are committed.
+# Per-epoch snapshots (~90 MB each), Ultralytics' side-output dirs (newer versions
+# write to runs/detect/... and train_*.py copy best/last.pt to the canonical path),
+# and training logs stay local.
+**/weights/epoch*.pt
+services/inference/training/runs/detect/
+services/inference/training/*.log

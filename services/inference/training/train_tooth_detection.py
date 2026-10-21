@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
 import torch
@@ -84,9 +85,14 @@ def main() -> None:
         cos_lr=True,
         weight_decay=WEIGHT_DECAY,
         # Conservative augmentation: OPGs have fixed anatomical orientation and cannot
-        # be freely rotated/flipped vertically or mixed via mosaic without breaking
-        # clinical context.
-        fliplr=0.3,
+        # be freely rotated/flipped (vertically OR horizontally) or mixed via mosaic
+        # without breaking clinical context. fliplr MUST stay 0: Ultralytics' flip
+        # mirrors box coordinates but does not remap class ids, and FDI classes are
+        # left/right-sensitive (quadrant 1 vs 2, 3 vs 4) -- flipping without remapping
+        # teaches the model that a class can legitimately appear on either side,
+        # which produces exactly the mirrored-quadrant confusion (e.g. 31 vs 41
+        # boxes landing on the same physical tooth) seen in validation output.
+        fliplr=0.0,
         flipud=0.0,
         degrees=5.0,
         translate=0.05,
@@ -97,7 +103,30 @@ def main() -> None:
         mosaic=0.0,
     )
 
-    best_checkpoint = project_dir / "train" / "weights" / "best.pt"
+    canonical_dir = project_dir / "train"
+    best_checkpoint = canonical_dir / "weights" / "best.pt"
+
+    # Ultralytics' actual save location (model.trainer.save_dir) is the only
+    # authoritative source of truth -- newer ultralytics versions insert a
+    # RUNS_DIR/<task>/ prefix in front of a relative `project=` path (see
+    # get_save_dir()'s own docstring), which silently broke this exact
+    # best_checkpoint path assumption and pipeline_state.reset_step's
+    # archive-before-delete safety net for it. Copy into the canonical
+    # location the rest of this codebase (inference.py, streamlit_app.py,
+    # reset_step) expects, regardless of where ultralytics actually wrote it.
+    actual_save_dir = model.trainer.save_dir
+    if actual_save_dir.resolve() != canonical_dir.resolve():
+        print(
+            f"Note: ultralytics saved outputs to {actual_save_dir} instead of the expected "
+            f"{canonical_dir}. Copying weights to the canonical location."
+        )
+        canonical_weights = canonical_dir / "weights"
+        canonical_weights.mkdir(parents=True, exist_ok=True)
+        for fname in ("best.pt", "last.pt"):
+            src = actual_save_dir / "weights" / fname
+            if src.exists():
+                shutil.copy2(src, canonical_weights / fname)
+
     val_map50 = 0.0
     try:
         metrics = model.val()
