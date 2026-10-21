@@ -64,26 +64,33 @@ def assess_missing_teeth(
 
     Returns:
         (likely_missing, uncertain): likely_missing is a sorted FDI list;
-        uncertain is a list of {"fdi_number", "reason"} sorted by FDI number.
+        uncertain is a list of {"fdi_number", "reason", "bbox", "confidence"}
+        sorted by FDI number, where bbox/confidence are the sub-threshold box that
+        triggered it (so a viewer can show the dentist where to look).
     """
     likely_missing: list[str] = []
     uncertain: list[dict] = []
     for fdi in find_missing_teeth([d["fdi_number"] for d in detections]):
-        reason = _uncertainty_reason(fdi, detections, candidates)
-        if reason is None:
+        evidence = _uncertainty_evidence(fdi, detections, candidates)
+        if evidence is None:
             likely_missing.append(fdi)
         else:
-            uncertain.append({"fdi_number": fdi, "reason": reason})
+            reason, cand = evidence
+            uncertain.append(
+                {"fdi_number": fdi, "reason": reason, "bbox": cand["bbox"], "confidence": cand["confidence"]}
+            )
     return likely_missing, uncertain
 
 
-def _uncertainty_reason(fdi: str, detections: list[dict], candidates: list[dict]) -> str | None:
+def _uncertainty_evidence(
+    fdi: str, detections: list[dict], candidates: list[dict]
+) -> tuple[str, dict] | None:
     for cand in candidates:
         if cand["fdi_number"] != fdi:
             continue
         overlap = max((_iou(cand["bbox"], d["bbox"]) for d in detections), default=0.0)
         if overlap >= NUMBERING_ALT_MIN_IOU and cand["confidence"] >= NUMBERING_ALT_MIN_CONFIDENCE:
-            return REASON_NUMBERING
+            return REASON_NUMBERING, cand
         if overlap < DETECTOR_MISS_MAX_IOU and cand["confidence"] >= DETECTOR_MISS_MIN_CONFIDENCE:
-            return REASON_DETECTOR_MISS
+            return REASON_DETECTOR_MISS, cand
     return None

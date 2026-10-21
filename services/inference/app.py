@@ -37,6 +37,9 @@ class DetectionResult(BaseModel):
 class UncertainToothSite(BaseModel):
     fdi_number: str
     reason: str  # "possible_numbering_error" | "possible_detector_miss"
+    # The sub-threshold detection that triggered the flag (original image pixels).
+    bbox: list[float] | None = None
+    confidence: float | None = None
 
 
 class InferenceResponse(BaseModel):

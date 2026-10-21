@@ -67,6 +67,7 @@ from inference import (  # noqa: E402
     PathologyClassificationPipeline,
     ToothDetectionPipeline,
 )
+from postprocessing.overlap_dedup import _iou  # noqa: E402
 from preprocessing.image_loader import load_image  # noqa: E402
 
 # BGR tuples (kept BGR so landmark drawing via cv2 below doesn't need its own
@@ -113,14 +114,27 @@ def _draw_landmarks(canvas_bgr: np.ndarray, landmarks: dict[str, list[list[float
     return canvas_bgr
 
 
-def _build_figure(canvas_rgb: np.ndarray, detections: list[dict], selected_idx: int | None) -> go.Figure:
+# Uncertain sites (postprocessing/missing_tooth.py) are drawn as dashed outlines in
+# this colour, distinct from every PATHOLOGY_COLORS entry, so a low-confidence
+# "possible tooth" is visible without looking like a confirmed detection.
+UNCERTAIN_COLOR_RGB = "rgb(255,176,0)"
+UNCERTAIN_MERGE_IOU = 0.5
+
+
+def _build_figure(
+    canvas_rgb: np.ndarray,
+    detections: list[dict],
+    selected_idx: int | None,
+    uncertain_teeth: list[dict] | None = None,
+) -> go.Figure:
     """One go.Scatter fill-rectangle trace per tooth (trace index i+1, since the
     image itself is trace 0), so a click's curve_number maps straight back to
     detections[curve_number - 1]. hoveron="fills" makes the whole box -- not just
     its outline -- both hoverable and clickable, and the fill area scales with
     the image in data coordinates (unlike marker size, which is screen-pixel
     based and would drift out of alignment with the box when the chart is
-    resized)."""
+    resized). Uncertain-site traces come after every detection trace, so their
+    curve_numbers fall outside detections and clicks on them are ignored."""
     fig = px.imshow(canvas_rgb)
     fig.data[0].hoverinfo = "skip"  # don't show raw per-pixel RGB values on hover
 
@@ -149,6 +163,53 @@ def _build_figure(canvas_rgb: np.ndarray, detections: list[dict], selected_idx: 
                 hovertemplate=hover,
                 showlegend=False,
             )
+        )
+
+    reason_labels = {
+        "possible_numbering_error": "may be a neighbouring tooth numbered one position off",
+        "possible_detector_miss": "may be present but under-detected",
+    }
+    # One weak box often backs several neighbouring sites (e.g. the detector hedging
+    # between 32 and 33 for the same blurred tooth) -- draw it once, labelled "32/33?".
+    groups: list[list[dict]] = []
+    for site in uncertain_teeth or []:
+        if site.get("bbox") is None:
+            continue
+        group = next((g for g in groups if _iou(g[0]["bbox"], site["bbox"]) > UNCERTAIN_MERGE_IOU), None)
+        if group is None:
+            groups.append([site])
+        else:
+            group.append(site)
+
+    for group in groups:
+        x0, y0, x1, y1 = group[0]["bbox"]
+        label = "/".join(site["fdi_number"] for site in group)
+        reasons = "<br>".join(
+            f"{site['fdi_number']}: {reason_labels.get(site['reason'], site['reason'])}"
+            f" (conf {site['confidence']:.2f})"
+            for site in group
+        )
+        hover = f"<b>FDI {label}? (uncertain, below reporting threshold)</b><br>{reasons}<extra></extra>"
+        fig.add_trace(
+            go.Scatter(
+                x=[x0, x1, x1, x0, x0],
+                y=[y0, y0, y1, y1, y0],
+                mode="lines",
+                fill="toself",
+                fillcolor=UNCERTAIN_COLOR_RGB.replace("rgb", "rgba").replace(")", ",0.04)"),
+                line=dict(color=UNCERTAIN_COLOR_RGB, width=2, dash="dash"),
+                hoveron="fills",
+                hovertemplate=hover,
+                showlegend=False,
+            )
+        )
+        fig.add_annotation(
+            x=(x0 + x1) / 2,
+            y=y1,
+            text=f"{label}?",
+            showarrow=False,
+            yshift=-10,
+            font=dict(color=UNCERTAIN_COLOR_RGB, size=12),
         )
 
     fig.update_layout(
@@ -311,7 +372,7 @@ def main() -> None:
     canvas_rgb = cv2.cvtColor(canvas_bgr, cv2.COLOR_BGR2RGB)
 
     if detections:
-        fig = _build_figure(canvas_rgb, detections, selected_idx)
+        fig = _build_figure(canvas_rgb, detections, selected_idx, None if only_caries else uncertain_teeth)
         plot_state = st.plotly_chart(fig, on_select="rerun", selection_mode="points", key="xray_chart")
         plot_points = (plot_state or {}).get("selection", {}).get("points", [])
         if plot_points:

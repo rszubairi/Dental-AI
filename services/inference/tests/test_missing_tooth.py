@@ -62,14 +62,18 @@ def test_weak_alternative_label_on_detected_tooth_is_numbering_uncertainty():
     candidates = [_det("16", list(tooth_17["bbox"]), 0.15)]
     likely, uncertain = assess_missing_teeth(detections, candidates)
     assert likely == []
-    assert uncertain == [{"fdi_number": "16", "reason": REASON_NUMBERING}]
+    assert uncertain == [
+        {"fdi_number": "16", "reason": REASON_NUMBERING, "bbox": tooth_17["bbox"], "confidence": 0.15}
+    ]
 
 
 def test_weak_box_in_empty_space_is_detector_miss_uncertainty():
     candidates = [_det("36", [5000.0, 0.0, 5010.0, 10.0], 0.05)]
     likely, uncertain = assess_missing_teeth(_arch_without("36"), candidates)
     assert likely == []
-    assert uncertain == [{"fdi_number": "36", "reason": REASON_DETECTOR_MISS}]
+    assert uncertain == [
+        {"fdi_number": "36", "reason": REASON_DETECTOR_MISS, "bbox": [5000.0, 0.0, 5010.0, 10.0], "confidence": 0.05}
+    ]
 
 
 def test_too_faint_evidence_is_ignored():
