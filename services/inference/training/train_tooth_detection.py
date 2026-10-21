@@ -6,6 +6,10 @@ datasets/tooth_detection/README.md for format details).
 
 Usage:
     python train_tooth_detection.py --data ../../../datasets/dentex/yolo/dataset.yaml
+
+    # Higher-resolution experiment alongside the deployed model (dataset must be
+    # built at the same size -- prepare_stage1_dataset.py --target-size 1024):
+    python train_tooth_detection.py --data ../../../datasets/Dentex/yolo_1024/dataset.yaml         --imgsz 1024 --step-name stage1_1024 --project runs/stage1_1024         --base-model runs/pretrain_quadrant/train/weights/best.pt
 """
 
 from __future__ import annotations
@@ -49,6 +53,11 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=None, help="Overrides VRAM auto-detection")
     parser.add_argument("--project", default="runs/stage1")
     parser.add_argument(
+        "--step-name",
+        default=STEP_NAME,
+        help="Key in .dental_ai_state.json; use a new one for experiments so the deployed stage1 entry is untouched",
+    )
+    parser.add_argument(
         "--reset-step",
         action="store_true",
         help="Delete existing stage1 output and retrain from scratch, even if already complete",
@@ -58,10 +67,10 @@ def main() -> None:
     project_dir = Path(args.project)
 
     if args.reset_step:
-        reset_step(STEP_NAME, project_dir)
-    elif is_step_complete(STEP_NAME):
+        reset_step(args.step_name, project_dir)
+    elif is_step_complete(args.step_name):
         print(
-            f"{STEP_NAME} already complete per .dental_ai_state.json. "
+            f"{args.step_name} already complete per .dental_ai_state.json. "
             "Pass --reset-step to retrain from scratch."
         )
         return
@@ -134,7 +143,7 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001 - best-effort metric capture, training already succeeded
         print(f"Could not compute final val mAP@0.5 for state tracking: {exc}")
 
-    mark_step_complete(STEP_NAME, str(best_checkpoint), "map50", val_map50)
+    mark_step_complete(args.step_name, str(best_checkpoint), "map50", val_map50)
 
 
 if __name__ == "__main__":

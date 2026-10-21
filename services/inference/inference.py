@@ -29,7 +29,10 @@ PATHOLOGY_CHECKPOINT_PATH = os.environ.get(
 PATHOLOGY_CLASSES_PATH = os.environ.get(
     "PATHOLOGY_CLASSIFIER_CLASSES", "models/pathology_classifier/weights/classes.json"
 )
-DETECTION_CANVAS_SIZE = 640  # must match train_tooth_detection.py's --imgsz / dataset prep target_size
+# Fallback only: the letterbox canvas is read from the checkpoint's own training
+# imgsz (see ToothDetectionPipeline._load_model), so 640 and 1024 models both get
+# the canvas size they were trained on.
+DETECTION_CANVAS_SIZE = 640
 # Ultralytics' own predict() default. Boxes below this confidence aren't returned at
 # all. Raise it to cut false positives / near-duplicate boxes in crowded or noisy
 # regions (at the cost of dropping genuine low-confidence detections); lower it to
@@ -75,6 +78,7 @@ LANDMARK_MIN_PEAK_DISTANCE = 8
 class ToothDetectionPipeline:
     def __init__(self) -> None:
         self._model = None  # lazy-loaded on first run to keep service startup fast
+        self._canvas_size = DETECTION_CANVAS_SIZE
 
     def _load_model(self):
         if self._model is not None:
@@ -89,6 +93,10 @@ class ToothDetectionPipeline:
         from ultralytics import YOLO
 
         self._model = YOLO(MODEL_CHECKPOINT_PATH)
+        # Must match the canvas the checkpoint was trained on (dataset prep's
+        # --target-size == training --imgsz): a 1024-trained model fed a 640 canvas
+        # gets an upscaled, blurrier image and loses the resolution it was trained for.
+        self._canvas_size = int(self._model.overrides.get("imgsz", DETECTION_CANVAS_SIZE))
         return self._model
 
     def run(self, image_url: str) -> dict:
@@ -119,11 +127,15 @@ class ToothDetectionPipeline:
         # in a way the model never saw during training, causing missed/misplaced
         # detections.
         enhanced = apply_clahe(image)
-        canvas, scale, pad_left, pad_top = letterbox(enhanced, target_size=DETECTION_CANVAS_SIZE)
+        canvas, scale, pad_left, pad_top = letterbox(enhanced, target_size=self._canvas_size)
         rgb = to_rgb(canvas)
 
         results = model.predict(
-            rgb, verbose=False, conf=CANDIDATE_CONFIDENCE_FLOOR, iou=DETECTION_NMS_IOU_THRESHOLD
+            rgb,
+            verbose=False,
+            imgsz=self._canvas_size,
+            conf=CANDIDATE_CONFIDENCE_FLOOR,
+            iou=DETECTION_NMS_IOU_THRESHOLD,
         )[0]
 
         detections: list[dict] = []
