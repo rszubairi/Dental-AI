@@ -35,5 +35,11 @@
     "checkpoint": "services\\inference\\training\\runs\\stage1_rect_v1\\train\\weights\\best.pt",
     "map50": 0.9635348093483531,
     "completed_at": "2026-10-21T18:44:30.601619+00:00"
+  },
+  "stage2a_crown256_focal": {
+    "complete": true,
+    "checkpoint": "services\\inference\\training\\runs\\stage2a_crown256_focal\\best.pt",
+    "macro_auc": 0.8361967169413251,
+    "completed_at": "2026-10-22T00:03:21.575571+00:00"
   }
 }

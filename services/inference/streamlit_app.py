@@ -256,20 +256,39 @@ def main() -> None:
             "Enhanced (Rectangular 512x1024)": str(TRAINING_DIR / "runs/stage1_rect_v1/train/weights/best.pt"),
             "Baseline (Square 640x640)": str(TRAINING_DIR / "runs/stage1/train/weights/best.pt"),
         }
-        # Filter to only existing files
-        existing_checkpoints = {
+        existing_stage1 = {
             name: path for name, path in available_stage1_checkpoints.items() if Path(path).exists()
         }
-        if existing_checkpoints:
-            selected_ckpt_name = st.selectbox(
-                "Tooth Detection Checkpoint",
-                list(existing_checkpoints.keys()),
-                index=0,
-                help="Select which Stage 1 model weights to test",
-            )
-            chosen_ckpt_path = existing_checkpoints[selected_ckpt_name]
-            if inference.MODEL_CHECKPOINT_PATH != chosen_ckpt_path:
-                inference.MODEL_CHECKPOINT_PATH = chosen_ckpt_path
+        if existing_stage1:
+            selected_s1 = st.selectbox("Stage 1 (Tooth Detection)", list(existing_stage1.keys()), index=0)
+            if inference.MODEL_CHECKPOINT_PATH != existing_stage1[selected_s1]:
+                inference.MODEL_CHECKPOINT_PATH = existing_stage1[selected_s1]
+                _load_pipelines.clear()
+                st.rerun()
+
+        # Stage 2A Checkpoint selection
+        available_stage2a_checkpoints = {
+            "Enhanced (Crown 256x256 + Focal Loss)": {
+                "weights": str(TRAINING_DIR / "runs/stage2a_crown256_focal/best.pt"),
+                "classes": str(TRAINING_DIR / "runs/stage2a_crown256_focal/classes.json"),
+            },
+            "Baseline (128x128 Class-Weighted)": {
+                "weights": str(TRAINING_DIR / "runs/stage2a/best.pt"),
+                "classes": str(TRAINING_DIR / "runs/stage2a/classes.json"),
+            },
+        }
+        existing_stage2a = {
+            name: paths
+            for name, paths in available_stage2a_checkpoints.items()
+            if Path(paths["weights"]).exists()
+        }
+        if existing_stage2a:
+            selected_s2a = st.selectbox("Stage 2A (Pathology / Caries)", list(existing_stage2a.keys()), index=0)
+            target_weights = existing_stage2a[selected_s2a]["weights"]
+            target_classes = existing_stage2a[selected_s2a]["classes"]
+            if inference.PATHOLOGY_CHECKPOINT_PATH != target_weights:
+                inference.PATHOLOGY_CHECKPOINT_PATH = target_weights
+                inference.PATHOLOGY_CLASSES_PATH = target_classes
                 _load_pipelines.clear()
                 st.rerun()
 

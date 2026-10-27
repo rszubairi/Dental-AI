@@ -37,6 +37,9 @@ BATCH_SIZE = 32
 EPOCHS = 50
 PATIENCE = 15
 LEARNING_RATE = 1e-4
+FINAL_LR = 1e-6
+
+
 class FocalLoss(nn.Module):
     """Multi-class Focal Loss with gamma focusing to down-weight easy negatives (healthy teeth)
     and focus gradient updates on hard lesions (subtle caries)."""
@@ -169,6 +172,11 @@ def main() -> None:
     parser.add_argument("--focal-gamma", type=float, default=2.0)
     parser.add_argument("--out", default="runs/stage2a")
     parser.add_argument(
+        "--step-name",
+        default=STEP_NAME,
+        help="Key in .dental_ai_state.json; use a unique name for experiments to preserve baseline",
+    )
+    parser.add_argument(
         "--reset-step",
         action="store_true",
         help="Delete existing stage2a output and retrain from scratch, even if already complete",
@@ -178,10 +186,10 @@ def main() -> None:
     out_dir = Path(args.out)
 
     if args.reset_step:
-        reset_step(STEP_NAME, out_dir)
-    elif is_step_complete(STEP_NAME):
+        reset_step(args.step_name, out_dir)
+    elif is_step_complete(args.step_name):
         print(
-            f"{STEP_NAME} already complete per .dental_ai_state.json. "
+            f"{args.step_name} already complete per .dental_ai_state.json. "
             "Pass --reset-step to retrain from scratch."
         )
         return
@@ -259,7 +267,7 @@ def main() -> None:
             f"Best-checkpoint 'healthy' recall: {healthy_recall:.4f} "
             "(1 - this is the rate at which healthy teeth are wrongly flagged as pathology)"
         )
-    mark_step_complete(STEP_NAME, str(out_dir / "best.pt"), "macro_auc", best_auc)
+    mark_step_complete(args.step_name, str(out_dir / "best.pt"), "macro_auc", best_auc)
 
 
 if __name__ == "__main__":

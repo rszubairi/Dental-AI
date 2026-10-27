@@ -1,0 +1,45 @@
+{
+  "caries": {
+    "precision": 0.4114285714285714,
+    "recall": 0.6506024096385542,
+    "f1-score": 0.5040840140023337,
+    "support": 332.0
+  },
+  "deep_caries": {
+    "precision": 0.3191489361702128,
+    "recall": 0.46875,
+    "f1-score": 0.379746835443038,
+    "support": 64.0
+  },
+  "healthy": {
+    "precision": 0.8491847826086957,
+    "recall": 0.589622641509434,
+    "f1-score": 0.6959910913140311,
+    "support": 1060.0
+  },
+  "impacted": {
+    "precision": 0.5,
+    "recall": 0.8923076923076924,
+    "f1-score": 0.6408839779005525,
+    "support": 65.0
+  },
+  "periapical_lesion": {
+    "precision": 0.09090909090909091,
+    "recall": 0.375,
+    "f1-score": 0.14634146341463414,
+    "support": 16.0
+  },
+  "accuracy": 0.6083279115159401,
+  "macro avg": {
+    "precision": 0.43413427622331413,
+    "recall": 0.5952565486911361,
+    "f1-score": 0.47340947641491793,
+    "support": 1537.0
+  },
+  "weighted avg": {
+    "precision": 0.7098960524716605,
+    "recall": 0.6083279115159401,
+    "f1-score": 0.6333176115082448,
+    "support": 1537.0
+  }
+}
