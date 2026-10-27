@@ -8,7 +8,12 @@ Next.js -> Convex Mutation -> Inference Queue -> this service -> Convex -> Next.
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from inference import LandmarkRegressionPipeline, PathologyClassificationPipeline, ToothDetectionPipeline
+from inference import (
+    LandmarkRegressionPipeline,
+    PathologyClassificationPipeline,
+    ToothDetectionPipeline,
+    chart_review_flags,
+)
 
 app = FastAPI(title="Dental AI Inference Service", version="0.1.0")
 
@@ -51,6 +56,11 @@ class InferenceResponse(BaseModel):
     # Expected sites with no reported tooth, but where the detector saw weak evidence
     # of one -- for dentist review, not to be treated as confirmed missing teeth.
     uncertain_teeth: list[UncertainToothSite] = []
+    # Third-molar sites with no detected tooth; charted, but not implant candidates.
+    absent_wisdom_teeth: list[str] = []
+    # Quadrants ("1".."4") with an absent tooth, where Stage 1 often numbers the
+    # remaining teeth one position off -- the dentist should verify their FDI numbers.
+    numbering_review_quadrants: list[str] = []
     landmarks: dict[str, list[list[float]]] | None = None
 
 
@@ -98,6 +108,11 @@ def _run_model_on_bytes(
     return detections, missing_teeth, uncertain_teeth, landmarks
 
 
+def _chart_review_flags(model: str, detections: list[dict]) -> dict:
+    # The landmarks model runs no tooth detection, so there's nothing to chart.
+    return {} if model == "landmarks" else chart_review_flags(detections)
+
+
 @app.post("/v1/infer", response_model=InferenceResponse)
 def infer(req: InferenceRequest) -> InferenceResponse:
     if req.model not in SUPPORTED_MODELS:
@@ -112,6 +127,7 @@ def infer(req: InferenceRequest) -> InferenceResponse:
         detections=[DetectionResult(**d) for d in detections],
         missing_teeth=missing_teeth,
         uncertain_teeth=[UncertainToothSite(**u) for u in uncertain_teeth],
+        **_chart_review_flags(req.model, detections),
         landmarks=landmarks,
     )
 
@@ -139,5 +155,6 @@ async def infer_upload(
         detections=[DetectionResult(**d) for d in detections],
         missing_teeth=missing_teeth,
         uncertain_teeth=[UncertainToothSite(**u) for u in uncertain_teeth],
+        **_chart_review_flags(model, detections),
         landmarks=landmarks,
     )

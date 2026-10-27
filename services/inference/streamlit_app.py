@@ -66,7 +66,17 @@ from inference import (  # noqa: E402
     LandmarkRegressionPipeline,
     PathologyClassificationPipeline,
     ToothDetectionPipeline,
+    chart_review_flags,
 )
+from numbering_corrections import (  # noqa: E402
+    NOT_A_TOOTH,
+    apply_corrections,
+    model_fdi,
+    save_corrected_chart,
+    validate_corrections,
+)
+from postprocessing.fdi_mapping import FDI_TOOTH_NUMBERS  # noqa: E402
+from postprocessing.missing_tooth import find_absent_wisdom_teeth, find_missing_teeth  # noqa: E402
 from postprocessing.overlap_dedup import _iou  # noqa: E402
 from preprocessing.image_loader import load_image  # noqa: E402
 
@@ -243,6 +253,77 @@ def _style_table(df: pd.DataFrame, selected_idx: int | None) -> "pd.io.formats.s
     return df.style.apply(highlight, axis=1)
 
 
+def _render_numbering_editor(result: dict) -> None:
+    """Let the reviewing dentist renumber teeth, then save the chart as Stage 1
+    training data (see numbering_corrections.py)."""
+    detections = result["detections"]
+    flagged = result["review_flags"]["numbering_review_quadrants"]
+    with st.expander("Correct FDI numbering", expanded=bool(flagged)):
+        if result.get("dentist_verified"):
+            st.success("Numbering verified and saved. Edit and save again to amend it.")
+        st.caption(
+            "Teeth are listed upper arch then lower arch, each in X-ray left-to-right order, so a run "
+            f"numbered one position off reads in sequence. Choose '{NOT_A_TOOTH}' for a duplicate box."
+        )
+        order = sorted(
+            range(len(detections)),
+            key=lambda i: (detections[i]["fdi_number"][0] in "34", sum(detections[i]["bbox"][0::2])),
+        )
+        editor_df = pd.DataFrame(
+            [
+                {
+                    "Arch": "lower" if detections[i]["fdi_number"][0] in "34" else "upper",
+                    "Centre x (px)": round(sum(detections[i]["bbox"][0::2]) / 2),
+                    "Model FDI": model_fdi(detections[i]),
+                    "FDI": detections[i]["fdi_number"],
+                }
+                for i in order
+            ]
+        )
+        # Keyed by chart version so a saved correction reloads the editor from the new chart.
+        editor_key = f"{result['filename']}_{result.get('chart_version', 0)}"
+        edited = st.data_editor(
+            editor_df,
+            column_config={
+                "FDI": st.column_config.SelectboxColumn(options=FDI_TOOTH_NUMBERS + [NOT_A_TOOTH], required=True)
+            },
+            disabled=["Arch", "Centre x (px)", "Model FDI"],
+            hide_index=True,
+            use_container_width=True,
+            key=f"fdi_editor_{editor_key}",
+        )
+        complete = st.checkbox(
+            "Every tooth visible in this X-ray has a box (required to use this chart for training)",
+            key=f"fdi_complete_{editor_key}",
+        )
+        if not st.button("Save corrected chart", key=f"fdi_save_{editor_key}"):
+            return
+
+        corrected_fdis = [""] * len(detections)
+        for row, det_idx in enumerate(order):
+            corrected_fdis[det_idx] = edited["FDI"].iloc[row]
+        problems = validate_corrections(corrected_fdis)
+        if problems:
+            st.error("Not saved: " + "; ".join(problems))
+            return
+        save_corrected_chart(
+            result["image"], result["filename"], inference.MODEL_CHECKPOINT_PATH, detections, corrected_fdis, complete
+        )
+        corrected = apply_corrections(detections, corrected_fdis)
+        fdi_numbers = [d["fdi_number"] for d in corrected]
+        result.update(
+            detections=corrected,
+            # The dentist has confirmed the chart, so the triage and review flags no longer apply.
+            missing_teeth=find_missing_teeth(fdi_numbers),
+            uncertain_teeth=[],
+            review_flags={"absent_wisdom_teeth": find_absent_wisdom_teeth(fdi_numbers), "numbering_review_quadrants": []},
+            dentist_verified=True,
+            chart_version=result.get("chart_version", 0) + 1,
+        )
+        st.session_state["selected_idx"] = None
+        st.rerun()
+
+
 def main() -> None:
     st.set_page_config(page_title="Dental AI - Model Verification", layout="wide")
     st.title("Dental AI - Model Verification Viewer")
@@ -377,6 +458,8 @@ def main() -> None:
             "detections": detections,
             "missing_teeth": missing_teeth,
             "uncertain_teeth": uncertain_teeth,
+            # Landmarks mode runs no tooth detection, so there's no chart to flag.
+            "review_flags": None if mode == "landmarks" else chart_review_flags(detections),
             "landmarks": landmarks,
             "image": image,
             "filename": filename,
@@ -445,6 +528,17 @@ def main() -> None:
             "Uncertain: "
             + ", ".join(f"{u['fdi_number']} ({reason_labels.get(u['reason'], u['reason'])})" for u in uncertain_teeth)
         )
+    review_flags = result.get("review_flags")
+    if review_flags:
+        if review_flags["absent_wisdom_teeth"]:
+            st.write("Absent third molars: " + ", ".join(review_flags["absent_wisdom_teeth"]))
+        if review_flags["numbering_review_quadrants"]:
+            st.warning(
+                "Verify FDI numbering in quadrant(s) "
+                + ", ".join(f"Q{q}" for q in review_flags["numbering_review_quadrants"])
+                + ": a tooth is absent there, and the detector often numbers the remaining teeth "
+                "one position off when neighbours have drifted into the space."
+            )
 
     selected_idx = st.session_state.get("selected_idx")
     if detections:
@@ -477,6 +571,9 @@ def main() -> None:
                 st.session_state["_last_table_sig"] = sig
                 st.session_state["selected_idx"] = new_idx
                 st.rerun()
+
+    if detections and review_flags is not None and not only_caries:
+        _render_numbering_editor(result)
 
     selected_idx = st.session_state.get("selected_idx")
     if selected_idx is not None and 0 <= selected_idx < len(detections):

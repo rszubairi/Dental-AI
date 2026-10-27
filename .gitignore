@@ -34,6 +34,8 @@ __pycache__/
 *.pyc
 services/inference/.env
 services/inference/openai_label_studio_predictions.jsonl
+# Dentist numbering corrections hold patient X-rays (see numbering_corrections.py).
+services/inference/numbering_corrections/
 
 # Training outputs: only the best.pt checkpoints that inference loads are committed.
 # Per-epoch snapshots (~90 MB each), Ultralytics' side-output dirs (newer versions

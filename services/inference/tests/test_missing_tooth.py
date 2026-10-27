@@ -8,7 +8,9 @@ from postprocessing.missing_tooth import (
     REASON_DETECTOR_MISS,
     REASON_NUMBERING,
     assess_missing_teeth,
+    find_absent_wisdom_teeth,
     find_missing_teeth,
+    find_quadrants_needing_numbering_review,
 )
 
 
@@ -34,6 +36,23 @@ def test_no_detections_flags_all_expected_teeth():
 def test_wisdom_tooth_absence_not_flagged():
     all_but_wisdom = sorted(EXPECTED_FDI_SET)  # wisdom teeth already excluded from expected set
     assert find_missing_teeth(all_but_wisdom) == []
+
+
+def test_absent_wisdom_teeth_reported_separately():
+    detected = sorted(EXPECTED_FDI_SET | {"28", "38"})
+    assert find_absent_wisdom_teeth(detected) == ["18", "48"]
+    assert find_missing_teeth(detected) == []
+
+
+def test_complete_arch_needs_no_numbering_review():
+    # Absent wisdom teeth alone don't trigger review.
+    assert find_quadrants_needing_numbering_review(sorted(EXPECTED_FDI_SET)) == []
+
+
+def test_quadrants_with_absent_teeth_need_numbering_review():
+    # val_36-style case: a lone upper-left premolar and two lower-left premolars gone.
+    detected = sorted(EXPECTED_FDI_SET - {"24", "34", "35"})
+    assert find_quadrants_needing_numbering_review(detected) == ["2", "3"]
 
 
 def _det(fdi: str, bbox: list[float], confidence: float) -> dict:

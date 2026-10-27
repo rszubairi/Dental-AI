@@ -3,7 +3,8 @@
 DENTEX (and Stage 1 in general) only annotates/detects teeth that are physically
 present. Missing teeth are inferred by diffing the expected adult FDI set against
 whatever Stage 1 actually detected. Wisdom teeth (18/28/38/48) are excluded from
-the expected set since their absence is common and not itself abnormal.
+the expected set since their absence is common and not itself abnormal; they are
+reported separately by find_absent_wisdom_teeth() so the chart is still complete.
 
 A plain diff can't tell a missing tooth from a Stage 1 mistake: on DENTEX's
 held-out split ~40% of diffed "missing" sites hold a real tooth that was either
@@ -50,6 +51,32 @@ def find_missing_teeth(detected_fdi_numbers: list[str]) -> list[str]:
     """
     detected = set(detected_fdi_numbers)
     return _sort_fdi(EXPECTED_FDI_SET - detected)
+
+
+def find_absent_wisdom_teeth(detected_fdi_numbers: list[str]) -> list[str]:
+    """Return the sorted wisdom-tooth sites (18/28/38/48) with no detected tooth.
+
+    Kept apart from find_missing_teeth(): an absent third molar (agenesis,
+    extraction, or unerupted outside the detector's view) is charted by dentists
+    but isn't an implant-assessment site. On DENTEX's held-out splits 92-94% of
+    these are truly absent.
+    """
+    return _sort_fdi(WISDOM_TEETH - set(detected_fdi_numbers))
+
+
+def find_quadrants_needing_numbering_review(detected_fdi_numbers: list[str]) -> list[str]:
+    """Return the quadrants ("1".."4") whose FDI numbering a dentist should verify.
+
+    Stage 1 numbers teeth largely by their position in the row, so once a non-wisdom
+    tooth is absent and its neighbours have drifted into the space, it often numbers
+    the whole run one position off (e.g. a 47 called 48 when 48 is absent, or a lone
+    premolar called 24 when it's really 25). On DENTEX's held-out splits ~31% of
+    quadrants with an absent non-wisdom site have at least one misnumbered tooth,
+    vs 2-4% of complete quadrants, and they hold ~86% of all numbering errors.
+    Post-processing can't fix these -- the detector is confidently consistent in
+    the shifted labels -- so flag them instead.
+    """
+    return sorted({fdi[0] for fdi in find_missing_teeth(detected_fdi_numbers)})
 
 
 def assess_missing_teeth(

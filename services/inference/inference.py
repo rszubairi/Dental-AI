@@ -16,7 +16,12 @@ import numpy as np
 
 from postprocessing.arch_graph_matcher import enforce_dental_arch_ordering
 from postprocessing.fdi_mapping import index_to_fdi
-from postprocessing.missing_tooth import DETECTOR_MISS_MIN_CONFIDENCE, assess_missing_teeth
+from postprocessing.missing_tooth import (
+    DETECTOR_MISS_MIN_CONFIDENCE,
+    assess_missing_teeth,
+    find_absent_wisdom_teeth,
+    find_quadrants_needing_numbering_review,
+)
 from postprocessing.overlap_dedup import deduplicate_overlapping_detections
 from preprocessing.image_loader import load_image
 from preprocessing.training_transforms import apply_clahe, extract_crop, letterbox, to_rgb
@@ -76,6 +81,17 @@ LANDMARK_PEAK_THRESHOLD = float(os.environ.get("LANDMARK_PEAK_THRESHOLD", "0.5")
 LANDMARK_MIN_PEAK_DISTANCE = 8
 
 
+def chart_review_flags(detections: list[dict]) -> dict:
+    """Absent third molars and quadrants whose numbering needs dentist review,
+    derived from reported detections (see postprocessing/missing_tooth.py). Kept
+    out of run_with_image_bytes' return tuple so existing callers don't change."""
+    fdi_numbers = [d["fdi_number"] for d in detections]
+    return {
+        "absent_wisdom_teeth": find_absent_wisdom_teeth(fdi_numbers),
+        "numbering_review_quadrants": find_quadrants_needing_numbering_review(fdi_numbers),
+    }
+
+
 class ToothDetectionPipeline:
     def __init__(self) -> None:
         self._model = None  # lazy-loaded on first run to keep service startup fast
@@ -106,7 +122,12 @@ class ToothDetectionPipeline:
 
     def run(self, image_url: str) -> dict:
         detections, missing_teeth, uncertain_teeth, _normalized_image = self.run_with_image(image_url)
-        return {"detections": detections, "missing_teeth": missing_teeth, "uncertain_teeth": uncertain_teeth}
+        return {
+            "detections": detections,
+            "missing_teeth": missing_teeth,
+            "uncertain_teeth": uncertain_teeth,
+            **chart_review_flags(detections),
+        }
 
     def run_with_image(self, image_url: str) -> tuple[list[dict], list[str], list[dict], np.ndarray]:
         """Same as run(), but also returns the normalized image so callers (e.g. the

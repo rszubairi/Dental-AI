@@ -10,6 +10,14 @@ Usage:
     # Higher-resolution experiment alongside the deployed model (dataset must be
     # built at the same size -- prepare_stage1_dataset.py --target-size 1024):
     python train_tooth_detection.py --data ../../../datasets/Dentex/yolo_1024/dataset.yaml         --imgsz 1024 --step-name stage1_1024 --project runs/stage1_1024         --base-model runs/pretrain_quadrant/train/weights/best.pt
+
+    # Numbering-focused retrain: oversample the train images the current model
+    # misnumbers (list from evaluate_numbering.py --split train --write-hard-examples),
+    # then compare against the deployed model with evaluate_numbering.py on val/test:
+    python train_tooth_detection.py --data ../../../datasets/Dentex/yolo/dataset.yaml \
+        --oversample-list hard_examples_stage1.txt --oversample-factor 3 \
+        --step-name stage1_hardnum --project runs/stage1_hardnum \
+        --base-model runs/pretrain_quadrant/train/weights/best.pt
 """
 
 from __future__ import annotations
@@ -43,6 +51,51 @@ def detect_batch_size() -> int:
     return BATCH_SIZE_HIGH_VRAM if total_vram_gb >= VRAM_BATCH_THRESHOLD_GB else BATCH_SIZE_LOW_VRAM
 
 
+def build_oversampled_dataset_yaml(data_yaml: str, stems_file: str, factor: int) -> str:
+    """Write a copy of data_yaml whose train split lists each image in stems_file
+    `factor` times (every other train image once), and return its path.
+
+    Ultralytics accepts a .txt list of image paths as a split and keeps repeated
+    lines, so this oversamples without duplicating any files on disk. Point it at
+    evaluate_numbering.py --write-hard-examples output: images the current model
+    misnumbers (mostly off-by-one runs next to absent teeth) are where it needs
+    more gradient. val/test are left untouched so checkpoints stay comparable.
+    """
+    import yaml
+
+    data_path = Path(data_yaml).resolve()
+    cfg = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    root = Path(cfg.get("path") or data_path.parent)
+    if not root.is_absolute():
+        root = (data_path.parent / root).resolve()
+    train_dir = root / cfg["train"]
+
+    hard_stems = {s.strip() for s in Path(stems_file).read_text(encoding="utf-8").splitlines() if s.strip()}
+    train_images = sorted(p for p in train_dir.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg"})
+    found = {p.stem for p in train_images} & hard_stems
+    if not found:
+        raise SystemExit(f"None of the {len(hard_stems)} stems in {stems_file} are in {train_dir}.")
+
+    lines = []
+    for image_path in train_images:
+        lines += [str(image_path)] * (factor if image_path.stem in found else 1)
+
+    list_path = root / f"train_oversampled_x{factor}.txt"
+    list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    out_cfg = {**cfg, "path": str(root), "train": str(list_path)}
+    for split in ("val", "test"):
+        if split in cfg:
+            out_cfg[split] = str(root / cfg[split])
+    out_yaml = root / f"dataset_oversampled_x{factor}.yaml"
+    out_yaml.write_text(yaml.safe_dump(out_cfg, sort_keys=False), encoding="utf-8")
+    print(
+        f"Oversampling {len(found)} hard examples x{factor} "
+        f"({len(hard_stems) - len(found)} listed stems not in train): "
+        f"{len(train_images)} -> {len(lines)} train entries. Using {out_yaml}"
+    )
+    return str(out_yaml)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", required=True, help="Path to YOLO dataset.yaml")
@@ -54,6 +107,16 @@ def main() -> None:
     parser.add_argument("--box", type=float, default=8.5, help="Box regression loss weight (default 8.5, standard 7.5)")
     parser.add_argument("--dfl", type=float, default=2.0, help="DFL loss weight (default 2.0, standard 1.5)")
     parser.add_argument("--project", default="runs/stage1")
+    parser.add_argument(
+        "--oversample-list",
+        help="File of train image stems to repeat (e.g. evaluate_numbering.py --write-hard-examples output)",
+    )
+    parser.add_argument(
+        "--oversample-factor",
+        type=int,
+        default=3,
+        help="How many times each --oversample-list image appears per epoch (default 3)",
+    )
     parser.add_argument(
         "--step-name",
         default=STEP_NAME,
@@ -85,9 +148,13 @@ def main() -> None:
     else:
         imgsz = int(args.imgsz)
 
+    data = args.data
+    if args.oversample_list:
+        data = build_oversampled_dataset_yaml(args.data, args.oversample_list, args.oversample_factor)
+
     model = YOLO(args.base_model)
     model.train(
-        data=args.data,
+        data=data,
         epochs=args.epochs,
         patience=args.patience,
         imgsz=imgsz,
