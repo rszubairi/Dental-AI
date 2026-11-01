@@ -60,23 +60,26 @@ os.environ.setdefault("LANDMARK_CHECKPOINT", str(TRAINING_DIR / "runs/stage2b/be
 # this checkpoint's actual weight shapes and fails to load; 32 is correct here.
 os.environ.setdefault("LANDMARK_BASE_FILTERS", "32")
 
-# Convex run log credentials (see inference_runs.py): from the environment,
-# services/inference/.env (git-ignored, where this service keeps its other keys),
-# or .streamlit/secrets.toml / Streamlit Cloud secrets. Streamlit reads
-# secrets.toml from the directory `streamlit run` is launched in, not this one.
+# Convex run log credentials (see inference_runs.py), first found wins:
+# .streamlit/secrets.toml / Streamlit Cloud secrets, the environment, then
+# services/inference/.env (git-ignored, where this service keeps its other keys).
+# Streamlit reads secrets.toml from the directory `streamlit run` is launched in,
+# not this one. Secrets are re-applied on every rerun, so editing them in Streamlit
+# Cloud takes effect without a reboot -- Cloud also exports secrets as environment
+# variables at startup, and that stale copy must not win.
 ENV_FILE = BASE_DIR / ".env"
+for _key in ("CONVEX_SITE_URL", "INFERENCE_LOG_SECRET"):
+    try:
+        if _key in st.secrets:
+            os.environ[_key] = st.secrets[_key]
+    except Exception:  # no secrets file at all
+        pass
 try:
     from dotenv import load_dotenv
 
     load_dotenv(ENV_FILE)  # never overrides variables already set
 except ImportError:
     pass
-for _key in ("CONVEX_SITE_URL", "INFERENCE_LOG_SECRET"):
-    try:
-        if _key not in os.environ and _key in st.secrets:
-            os.environ[_key] = st.secrets[_key]
-    except Exception:  # no secrets file at all
-        pass
 
 sys.path.insert(0, str(BASE_DIR))
 
