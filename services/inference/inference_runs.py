@@ -54,10 +54,36 @@ def _request(method: str, path: str, **kwargs) -> dict | list:
             )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise RunLogError(f"Convex run log returned {exc.response.status_code}: {exc.response.text}") from exc
+        raise RunLogError(
+            f"Convex run log returned {exc.response.status_code} for {method} {path}: {exc.response.text}"
+        ) from exc
     except httpx.HTTPError as exc:
         raise RunLogError(f"Could not reach the Convex run log: {exc}") from exc
     return response.json()
+
+
+def _store_sample(digest: str, filename: str, raw_bytes: bytes) -> None:
+    """Upload the X-ray to Convex storage unless it's already there. Goes through a
+    storage upload URL rather than an HTTP action, whose request size is limited."""
+    upload = _request("POST", "/samples/upload-url", params={"sha256": digest})
+    if upload["exists"]:
+        return
+    try:
+        # The upload URL is pre-signed: no Authorization header (the secret stays with the HTTP actions).
+        response = httpx.post(
+            upload["uploadUrl"],
+            content=raw_bytes,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=REQUEST_TIMEOUT_S,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise RunLogError(f"Could not upload the X-ray ({len(raw_bytes) / 1e6:.1f} MB) to Convex: {exc}") from exc
+    _request(
+        "POST",
+        "/samples",
+        json={"sha256": digest, "storageId": response.json()["storageId"], "filename": filename},
+    )
 
 
 def sample_digest(raw_bytes: bytes) -> str:
@@ -138,13 +164,7 @@ def log_run(*, raw_bytes: bytes, **run_fields) -> dict:
     """Store the X-ray (once per distinct X-ray) and the run in Convex. Takes
     build_run's arguments; returns the stored run. Raises RunLogError on failure."""
     run = build_run(raw_bytes=raw_bytes, **run_fields)
-    _request(
-        "POST",
-        "/samples",
-        params={"sha256": run["sampleSha256"], "filename": run["filename"]},
-        content=raw_bytes,
-        headers={"Content-Type": "application/octet-stream"},
-    )
+    _store_sample(run["sampleSha256"], run["filename"], raw_bytes)
     _request(
         "POST",
         "/runs",

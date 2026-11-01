@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+import httpx
 import numpy as np
 import pytest
 
@@ -55,17 +56,43 @@ def test_settings_cover_only_the_stages_a_mode_runs():
     assert set(inference_runs.current_settings("full_assessment")) == {"stage1", "stage2a", "stage2b"}
 
 
-def test_log_run_uploads_sample_then_run(monkeypatch):
-    calls = []
-    monkeypatch.setattr(inference_runs, "_request", lambda method, path, **kw: calls.append((method, path, kw)) or {})
+def _fake_convex(monkeypatch, sample_exists: bool) -> tuple[list, list]:
+    """Stub the HTTP actions and the storage upload URL; returns (action calls, uploads)."""
+    calls, uploads = [], []
+
+    def request(method, path, **kw):
+        calls.append((method, path, kw))
+        return {"exists": True} if sample_exists else {"exists": False, "uploadUrl": "https://upload"}
+
+    def post(url, **kw):
+        uploads.append((url, kw))
+        return httpx.Response(200, json={"storageId": "kg2abc"}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(inference_runs, "_request", request)
+    monkeypatch.setattr(httpx, "post", post)
+    return calls, uploads
+
+
+def test_log_run_uploads_new_sample_via_upload_url_then_run(monkeypatch):
+    calls, uploads = _fake_convex(monkeypatch, sample_exists=False)
     outputs = {"detections": [{"fdi_number": "11", "bbox": [0, 0, 1, 1], "confidence": np.float32(0.5)}]}
     run = log_run(**_fields(outputs=outputs))
 
-    (_, sample_path, sample_kw), (_, run_path, run_kw) = calls
-    assert sample_path == "/samples" and sample_kw["content"] == b"xray"
-    assert sample_kw["params"]["sha256"] == run["sampleSha256"]
-    assert run_path == "/runs"
-    assert json.loads(run_kw["content"])["outputs"]["detections"][0]["confidence"] == 0.5  # numpy -> float
+    assert [path for _, path, _ in calls] == ["/samples/upload-url", "/samples", "/runs"]
+    assert calls[0][2]["params"] == {"sha256": run["sampleSha256"]}
+    # The bytes go to the storage upload URL (no HTTP action size limit), without the secret.
+    [(url, upload_kw)] = uploads
+    assert url == "https://upload" and upload_kw["content"] == b"xray"
+    assert "Authorization" not in upload_kw["headers"]
+    assert calls[1][2]["json"] == {"sha256": run["sampleSha256"], "storageId": "kg2abc", "filename": "pano.png"}
+    assert json.loads(calls[2][2]["content"])["outputs"]["detections"][0]["confidence"] == 0.5  # numpy -> float
+
+
+def test_log_run_skips_upload_of_already_stored_sample(monkeypatch):
+    calls, uploads = _fake_convex(monkeypatch, sample_exists=True)
+    log_run(**_fields())
+    assert uploads == []
+    assert [path for _, path, _ in calls] == ["/samples/upload-url", "/runs"]
 
 
 def test_unconfigured_log_raises(monkeypatch):
@@ -76,8 +103,6 @@ def test_unconfigured_log_raises(monkeypatch):
 
 
 def test_redirect_explains_wrong_site_url(monkeypatch):
-    import httpx
-
     monkeypatch.setenv("CONVEX_SITE_URL", "https://dental-ai.streamlit.app")
     monkeypatch.setenv("INFERENCE_LOG_SECRET", "s")
     redirect = httpx.Response(303, headers={"location": "https://share.streamlit.io/-/auth/app"})
