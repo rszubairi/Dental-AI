@@ -44,3 +44,5 @@ services/inference/numbering_corrections/
 **/weights/epoch*.pt
 services/inference/training/runs/detect/
 services/inference/training/*.log
+# Streamlit secrets (INFERENCE_LOG_SECRET for the Convex run log).
+**/.streamlit/secrets.toml

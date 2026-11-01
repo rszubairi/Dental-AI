@@ -7,7 +7,8 @@ chart can: streamlit_app.py lets them relabel each box and saves the corrected
 chart here. Each save appends one record to CORRECTIONS_LOG and stores the
 decoded X-ray under CORRECTIONS_DIR/images, so
 datasets/Dentex/prepare_stage1_from_corrections.py can turn confirmed charts
-into extra Stage 1 training images.
+into extra Stage 1 training images, and training/compare_model_versions.py can
+score each model version by how much of its charts dentists had to correct.
 
 These files hold patient X-rays: CORRECTIONS_DIR is git-ignored.
 """
@@ -65,16 +66,22 @@ def save_corrected_chart(
     image: np.ndarray,
     filename: str,
     checkpoint: str,
+    model_version: dict,
     detections: list[dict],
     corrected_fdis: list[str],
     complete: bool,
+    run_id: str | None = None,
 ) -> dict:
     """Store the X-ray and append the corrected chart to CORRECTIONS_LOG.
 
     Args:
         image: the decoded grayscale X-ray the boxes are in (pipeline output).
+        model_version: model_version.describe() of the run that produced
+            detections -- captured at inference time, not save time, since the
+            checkpoint or thresholds may have changed in between.
         detections: the model's chart as shown to the dentist.
         corrected_fdis: the dentist's number (or NOT_A_TOOTH) for each detection.
+        run_id: the inference_runs.py run that produced detections, if logged.
         complete: the dentist confirmed every tooth present in the X-ray has a
             box. Only complete charts are used for training -- an unboxed tooth
             would otherwise be learned as background.
@@ -96,6 +103,9 @@ def save_corrected_chart(
         "source_filename": filename,
         "image": image_rel,
         "checkpoint": checkpoint,
+        "run_id": run_id,
+        "model_version": model_version["id"],
+        "model_version_components": model_version["components"],
         "complete": complete,
         "teeth": [
             {"bbox": [round(v, 1) for v in det["bbox"]], "model_fdi": model_fdi(det), "fdi": fdi}

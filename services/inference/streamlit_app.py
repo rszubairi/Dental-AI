@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -59,9 +60,20 @@ os.environ.setdefault("LANDMARK_CHECKPOINT", str(TRAINING_DIR / "runs/stage2b/be
 # this checkpoint's actual weight shapes and fails to load; 32 is correct here.
 os.environ.setdefault("LANDMARK_BASE_FILTERS", "32")
 
+# Convex run log credentials (see inference_runs.py): from the environment, or
+# from .streamlit/secrets.toml / Streamlit Cloud secrets.
+for _key in ("CONVEX_SITE_URL", "INFERENCE_LOG_SECRET"):
+    try:
+        if _key not in os.environ and _key in st.secrets:
+            os.environ[_key] = st.secrets[_key]
+    except Exception:  # no secrets file at all
+        pass
+
 sys.path.insert(0, str(BASE_DIR))
 
 import inference  # noqa: E402
+import inference_runs  # noqa: E402
+import model_version  # noqa: E402
 from inference import (  # noqa: E402
     LandmarkRegressionPipeline,
     PathologyClassificationPipeline,
@@ -307,7 +319,14 @@ def _render_numbering_editor(result: dict) -> None:
             st.error("Not saved: " + "; ".join(problems))
             return
         save_corrected_chart(
-            result["image"], result["filename"], inference.MODEL_CHECKPOINT_PATH, detections, corrected_fdis, complete
+            result["image"],
+            result["filename"],
+            result["checkpoint"],
+            result["model_version"],
+            detections,
+            corrected_fdis,
+            complete,
+            run_id=result.get("run_id"),
         )
         corrected = apply_corrections(detections, corrected_fdis)
         fdi_numbers = [d["fdi_number"] for d in corrected]
@@ -324,9 +343,202 @@ def _render_numbering_editor(result: dict) -> None:
         st.rerun()
 
 
+def _log_run(**run_fields) -> dict | None:
+    """Log the run to Convex (inference_runs.py); a logging failure is shown but
+    doesn't stop the result being displayed. Returns the stored run, or None."""
+    try:
+        return inference_runs.log_run(**run_fields)
+    except inference_runs.RunLogError as exc:
+        st.warning(f"This run was not logged: {exc}")
+        return None
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_versions() -> list[dict]:
+    return inference_runs.list_versions()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_runs(model_version: str | None = None, sample_sha256: str | None = None) -> list[dict]:
+    return inference_runs.list_runs(model_version=model_version, sample_sha256=sample_sha256)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_run(run_id: str) -> tuple[dict, bytes | None]:
+    """A run never changes once logged, so this is cached for the session."""
+    run = inference_runs.get_run(run_id)
+    return run, inference_runs.fetch_sample(run["sampleUrl"]) if run.get("sampleUrl") else None
+
+
+def _format_ms(ms: float) -> str:
+    return pd.to_datetime(ms, unit="ms", utc=True).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _runs_frame(runs: list[dict], columns: list[str]) -> pd.DataFrame:
+    rows = [
+        {
+            "Ran at": _format_ms(r["ranAt"]),
+            "Model version": r["modelVersion"],
+            "Mode": r["mode"],
+            "Source": r["source"],
+            "X-ray": r["filename"],
+            "Teeth": r["teethCount"],
+            "Missing": r["missingCount"],
+            "Uncertain": r["uncertainCount"],
+            "Duration (s)": r["durationS"],
+            "Error": r.get("error", ""),
+        }
+        for r in runs
+    ]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _per_version_average(version: dict, total_key: str, digits: int) -> float | None:
+    succeeded = version["runs"] - version["failed"]
+    return round(version[total_key] / succeeded, digits) if succeeded else None
+
+
+def _render_logged_run(run_id: str) -> None:
+    run, sample_bytes = _cached_run(run_id)
+    st.subheader(f"Run on {run['filename']}")
+    st.caption(f"{_format_ms(run['ranAt'])} -- `{run['modelVersion']}` -- {run['mode']} -- {run['durationS']} s")
+    if run.get("error"):
+        st.error(f"Failed: {run['error']}")
+
+    outputs = run.get("outputs") or {}
+    detections = outputs.get("detections") or []
+    if sample_bytes is not None:
+        image = load_image(sample_bytes, filename=run["filename"])
+        canvas_bgr = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        if outputs.get("landmarks"):
+            canvas_bgr = _draw_landmarks(canvas_bgr, outputs["landmarks"])
+        canvas_rgb = cv2.cvtColor(canvas_bgr, cv2.COLOR_BGR2RGB)
+        if detections:
+            fig = _build_figure(canvas_rgb, detections, None, outputs.get("uncertain_teeth"))
+            st.plotly_chart(fig, key=f"logged_run_{run_id}")
+        else:
+            st.image(canvas_rgb, caption=run["filename"], use_container_width=True)
+    else:
+        st.warning("This run's X-ray isn't in storage.")
+
+    if outputs.get("missing_teeth"):
+        st.write("Likely missing: " + ", ".join(outputs["missing_teeth"]))
+    if outputs.get("uncertain_teeth"):
+        st.write("Uncertain: " + ", ".join(f"{u['fdi_number']} ({u['reason']})" for u in outputs["uncertain_teeth"]))
+    if detections:
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "FDI": d["fdi_number"],
+                        "Detection conf.": round(d["confidence"], 3),
+                        "Pathology": d.get("pathology") or "-",
+                        "Pathology conf.": (
+                            round(d["pathology_confidence"], 3) if d.get("pathology_confidence") is not None else None
+                        ),
+                    }
+                    for d in detections
+                ]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    other_runs = [r for r in _cached_runs(sample_sha256=run["sampleSha256"]) if r["runId"] != run_id]
+    if other_runs:
+        st.markdown("**Other runs on this X-ray**")
+        st.dataframe(
+            _runs_frame(other_runs, ["Ran at", "Model version", "Mode", "Teeth", "Missing", "Uncertain", "Error"]),
+            use_container_width=True,
+            hide_index=True,
+        )
+    with st.expander("Settings and model version components"):
+        st.json({"settings": run["settings"], "model_version_components": run["modelVersionComponents"]})
+    with st.expander("Raw outputs"):
+        st.json(outputs)
+
+
+def _render_run_log() -> None:
+    """Every inference run logged to Convex (inference_runs.py), by model version."""
+    st.subheader("Inference run log")
+    if not inference_runs.is_configured():
+        st.info(
+            "Set CONVEX_SITE_URL and INFERENCE_LOG_SECRET (environment or .streamlit/secrets.toml) "
+            "to log runs to Convex and browse them here."
+        )
+        return
+    if st.button("Refresh"):
+        _cached_versions.clear()
+        _cached_runs.clear()
+    try:
+        versions = _cached_versions()
+    except inference_runs.RunLogError as exc:
+        st.error(str(exc))
+        return
+    if not versions:
+        st.info("No runs logged yet.")
+        return
+
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Model version": v["modelVersion"],
+                    "Runs": v["runs"],
+                    "X-rays": v["samples"],
+                    "Failed": v["failed"],
+                    "Modes": ", ".join(v["modes"]),
+                    "Avg teeth": _per_version_average(v, "totalTeeth", 1),
+                    "Avg duration (s)": _per_version_average(v, "totalDurationS", 2),
+                    "First run": _format_ms(v["firstRanAt"]),
+                    "Last run": _format_ms(v["lastRanAt"]),
+                }
+                for v in versions
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    selected_version = st.selectbox("Model version", [v["modelVersion"] for v in versions])
+    components = next(v["modelVersionComponents"] for v in versions if v["modelVersion"] == selected_version)
+    with st.expander("What this version is made of"):
+        st.json(components)
+
+    try:
+        runs = _cached_runs(model_version=selected_version)
+    except inference_runs.RunLogError as exc:
+        st.error(str(exc))
+        return
+    st.caption(f"{len(runs)} most recent run(s) of this version. Select one to see its result.")
+    table_state = st.dataframe(
+        _runs_frame(
+            runs,
+            ["Ran at", "Mode", "Source", "X-ray", "Teeth", "Missing", "Uncertain", "Duration (s)", "Error"],
+        ),
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"run_log_table_{selected_version}",
+    )
+    selected_rows = (table_state or {}).get("selection", {}).get("rows", [])
+    if selected_rows:
+        try:
+            _render_logged_run(runs[selected_rows[0]]["runId"])
+        except inference_runs.RunLogError as exc:
+            st.error(str(exc))
+
+
 def main() -> None:
     st.set_page_config(page_title="Dental AI - Model Verification", layout="wide")
     st.title("Dental AI - Model Verification Viewer")
+
+    view = st.sidebar.radio("View", ["Run inference", "Run log"], horizontal=True)
+    if view == "Run log":
+        _render_run_log()
+        return
+
     st.caption("Run trained checkpoints against DENTEX validation images (or your own upload) for visual QA.")
 
     with st.sidebar:
@@ -433,6 +645,19 @@ def main() -> None:
         return
 
     if run_clicked:
+        # Captured before the run, as it ran: the sidebar may change checkpoints or
+        # thresholds before the dentist saves feedback on this result.
+        version = model_version.describe(mode)
+        settings = inference_runs.current_settings(mode)
+        run_log = {
+            "mode": mode,
+            "source": source,
+            "filename": filename,
+            "raw_bytes": raw_bytes,
+            "model_version": version,
+            "settings": settings,
+        }
+        started = time.perf_counter()
         try:
             with st.spinner("Running inference..."):
                 if mode == "tooth_detection":
@@ -451,18 +676,35 @@ def main() -> None:
                     detections = pathology_pipeline.classify_crops(image, raw_detections)
                     landmarks = landmark_pipeline.run_with_image_bytes(raw_bytes, filename)
         except RuntimeError as exc:
+            _log_run(**run_log, duration_s=time.perf_counter() - started, error=str(exc))
             st.error(str(exc))
             return
+
+        # Landmarks mode runs no tooth detection, so there's no chart to flag.
+        review_flags = None if mode == "landmarks" else chart_review_flags(detections)
+        run = _log_run(
+            **run_log,
+            duration_s=time.perf_counter() - started,
+            outputs={
+                "detections": detections,
+                "missing_teeth": missing_teeth,
+                "uncertain_teeth": uncertain_teeth,
+                "review_flags": review_flags,
+                "landmarks": landmarks,
+            },
+        )
 
         st.session_state["result"] = {
             "detections": detections,
             "missing_teeth": missing_teeth,
             "uncertain_teeth": uncertain_teeth,
-            # Landmarks mode runs no tooth detection, so there's no chart to flag.
-            "review_flags": None if mode == "landmarks" else chart_review_flags(detections),
+            "review_flags": review_flags,
             "landmarks": landmarks,
             "image": image,
             "filename": filename,
+            "checkpoint": settings.get("stage1", {}).get("checkpoint"),
+            "model_version": version,
+            "run_id": run["runId"] if run else None,
         }
         # A fresh run invalidates whatever tooth was selected before (it may not
         # even exist in the new detection set), and any pending click/row
@@ -513,6 +755,8 @@ def main() -> None:
         st.image(canvas_rgb, caption=filename, use_container_width=True)
 
     st.subheader("Summary")
+    if "model_version" in result:
+        st.caption(f"Model version: `{result['model_version']['id']}`")
     metric_cols = st.columns(3)
     metric_cols[0].metric("Caries detected" if only_caries else "Teeth detected", len(detections))
     metric_cols[1].metric("Missing teeth (FDI)", len(missing_teeth))

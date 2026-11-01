@@ -8,6 +8,7 @@ Next.js -> Convex Mutation -> Inference Queue -> this service -> Convex -> Next.
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+import model_version
 from inference import (
     LandmarkRegressionPipeline,
     PathologyClassificationPipeline,
@@ -51,6 +52,11 @@ class InferenceResponse(BaseModel):
     job_id: str
     case_id: str
     model: str
+    # Identifies the exact weights, code and thresholds behind this result (see
+    # model_version.py). Store it with the report and with any dentist feedback on
+    # it, so feedback can be compared across versions.
+    model_version: str
+    model_version_components: dict[str, str | dict[str, str]]
     detections: list[DetectionResult]
     missing_teeth: list[str]
     # Expected sites with no reported tooth, but where the detector saw weak evidence
@@ -67,6 +73,12 @@ class InferenceResponse(BaseModel):
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/v1/model-version")
+def get_model_version() -> dict[str, dict]:
+    """The version each model would report right now, e.g. to confirm a deploy."""
+    return {model: model_version.describe(model) for model in sorted(SUPPORTED_MODELS)}
 
 
 def _run_model_on_url(model: str, image_url: str) -> tuple[list[dict], list[str], list[dict], dict | None]:
@@ -113,6 +125,11 @@ def _chart_review_flags(model: str, detections: list[dict]) -> dict:
     return {} if model == "landmarks" else chart_review_flags(detections)
 
 
+def _version_fields(model: str) -> dict:
+    version = model_version.describe(model)
+    return {"model_version": version["id"], "model_version_components": version["components"]}
+
+
 @app.post("/v1/infer", response_model=InferenceResponse)
 def infer(req: InferenceRequest) -> InferenceResponse:
     if req.model not in SUPPORTED_MODELS:
@@ -124,6 +141,7 @@ def infer(req: InferenceRequest) -> InferenceResponse:
         job_id=req.job_id,
         case_id=req.case_id,
         model=req.model,
+        **_version_fields(req.model),
         detections=[DetectionResult(**d) for d in detections],
         missing_teeth=missing_teeth,
         uncertain_teeth=[UncertainToothSite(**u) for u in uncertain_teeth],
@@ -152,6 +170,7 @@ async def infer_upload(
         job_id=job_id,
         case_id=case_id,
         model=model,
+        **_version_fields(model),
         detections=[DetectionResult(**d) for d in detections],
         missing_teeth=missing_teeth,
         uncertain_teeth=[UncertainToothSite(**u) for u in uncertain_teeth],

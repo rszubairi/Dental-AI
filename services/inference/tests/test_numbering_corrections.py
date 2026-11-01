@@ -16,6 +16,9 @@ from numbering_corrections import (
 )
 
 
+VERSION = {"id": "test+0000abcd", "release": "test", "components": {"code": "abc"}}
+
+
 def _det(fdi: str, x: float) -> dict:
     return {"fdi_number": fdi, "bbox": [x, 0.0, x + 10.0, 10.0], "confidence": 0.9}
 
@@ -52,13 +55,14 @@ def test_save_and_load_latest_chart(tmp_path, monkeypatch):
     image = np.zeros((20, 40), dtype=np.uint8)
     detections = [_det("24", 0), _det("26", 20)]
 
-    save_corrected_chart(image, "val_36.png", "ckpt.pt", detections, ["24", "26"], complete=False)
-    save_corrected_chart(image, "val_36.png", "ckpt.pt", detections, ["25", "26"], complete=True)
+    save_corrected_chart(image, "val_36.png", "ckpt.pt", VERSION, detections, ["24", "26"], complete=False)
+    save_corrected_chart(image, "val_36.png", "ckpt.pt", VERSION, detections, ["25", "26"], complete=True)
 
     charts = load_latest_charts(tmp_path / "corrections.jsonl")
     assert len(charts) == 1  # same image -> latest save wins
     assert charts[0]["complete"] is True
     assert [(t["model_fdi"], t["fdi"]) for t in charts[0]["teeth"]] == [("24", "25"), ("26", "26")]
+    assert charts[0]["model_version"] == "test+0000abcd"
     assert (tmp_path / charts[0]["image"]).exists()
     assert len((tmp_path / "corrections.jsonl").read_text().splitlines()) == 2
     json.loads((tmp_path / "corrections.jsonl").read_text().splitlines()[0])
