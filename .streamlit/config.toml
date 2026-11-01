@@ -1,0 +1,10 @@
+# Read by `streamlit run services/inference/streamlit_app.py` launched from the
+# repo root, which is also how Streamlit Community Cloud runs it.
+
+[server]
+# A push to the deployed app rewrites source files while sessions may be running.
+# Streamlit then evicts the app's modules from sys.modules, and a session caught
+# mid-import fails with e.g. "KeyError: 'inference_runs'". Rerunning on every
+# change means the last rerun, after all files are written, succeeds on its own
+# instead of leaving the error on screen until the page is reloaded.
+runOnSave = true
