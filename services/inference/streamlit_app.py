@@ -60,8 +60,17 @@ os.environ.setdefault("LANDMARK_CHECKPOINT", str(TRAINING_DIR / "runs/stage2b/be
 # this checkpoint's actual weight shapes and fails to load; 32 is correct here.
 os.environ.setdefault("LANDMARK_BASE_FILTERS", "32")
 
-# Convex run log credentials (see inference_runs.py): from the environment, or
-# from .streamlit/secrets.toml / Streamlit Cloud secrets.
+# Convex run log credentials (see inference_runs.py): from the environment,
+# services/inference/.env (git-ignored, where this service keeps its other keys),
+# or .streamlit/secrets.toml / Streamlit Cloud secrets. Streamlit reads
+# secrets.toml from the directory `streamlit run` is launched in, not this one.
+ENV_FILE = BASE_DIR / ".env"
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ENV_FILE)  # never overrides variables already set
+except ImportError:
+    pass
 for _key in ("CONVEX_SITE_URL", "INFERENCE_LOG_SECRET"):
     try:
         if _key not in os.environ and _key in st.secrets:
@@ -462,9 +471,11 @@ def _render_run_log() -> None:
     """Every inference run logged to Convex (inference_runs.py), by model version."""
     st.subheader("Inference run log")
     if not inference_runs.is_configured():
+        missing = [k for k in ("CONVEX_SITE_URL", "INFERENCE_LOG_SECRET") if not os.environ.get(k)]
         st.info(
-            "Set CONVEX_SITE_URL and INFERENCE_LOG_SECRET (environment or .streamlit/secrets.toml) "
-            "to log runs to Convex and browse them here."
+            f"Not set: {', '.join(missing)}. Add them to `{ENV_FILE}`, to `.streamlit/secrets.toml` in "
+            f"the directory Streamlit was launched from (currently `{Path.cwd()}`), or as environment "
+            "variables of the terminal that runs `streamlit run`, then restart Streamlit."
         )
         return
     if st.button("Refresh"):
