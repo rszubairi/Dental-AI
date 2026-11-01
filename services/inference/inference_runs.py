@@ -44,6 +44,14 @@ def _request(method: str, path: str, **kwargs) -> dict | list:
     headers = {"Authorization": f"Bearer {os.environ['INFERENCE_LOG_SECRET']}", **kwargs.pop("headers", {})}
     try:
         response = httpx.request(method, url, headers=headers, timeout=REQUEST_TIMEOUT_S, **kwargs)
+        # Convex HTTP actions never redirect: a redirect means CONVEX_SITE_URL points
+        # somewhere else (e.g. the Streamlit app's own URL, behind its login page).
+        if response.is_redirect:
+            raise RunLogError(
+                f"CONVEX_SITE_URL ({os.environ['CONVEX_SITE_URL']}) redirected to "
+                f"{response.headers.get('location', 'another page')}: it should be the Convex "
+                "deployment's HTTP actions URL, https://<name>.convex.site."
+            )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         raise RunLogError(f"Convex run log returned {exc.response.status_code}: {exc.response.text}") from exc

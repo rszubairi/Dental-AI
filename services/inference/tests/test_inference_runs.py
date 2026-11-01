@@ -73,3 +73,14 @@ def test_unconfigured_log_raises(monkeypatch):
     monkeypatch.delenv("INFERENCE_LOG_SECRET", raising=False)
     with pytest.raises(RunLogError):
         log_run(**_fields())
+
+
+def test_redirect_explains_wrong_site_url(monkeypatch):
+    import httpx
+
+    monkeypatch.setenv("CONVEX_SITE_URL", "https://dental-ai.streamlit.app")
+    monkeypatch.setenv("INFERENCE_LOG_SECRET", "s")
+    redirect = httpx.Response(303, headers={"location": "https://share.streamlit.io/-/auth/app"})
+    monkeypatch.setattr(httpx, "request", lambda *a, **kw: redirect)
+    with pytest.raises(RunLogError, match="convex.site"):
+        inference_runs.list_versions()
