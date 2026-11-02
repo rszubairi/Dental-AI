@@ -355,6 +355,37 @@ def _render_numbering_editor(result: dict) -> None:
         st.rerun()
 
 
+def _render_comment_box(result: dict) -> None:
+    """Dentist comment on this result, saved to the run log as a new row that
+    repeats the run's values and model version (inference_runs.log_comment)."""
+    run = result.get("run")
+    with st.form(f"comment_form_{result.get('run_id')}", clear_on_submit=True):
+        comment = st.text_area(
+            "Dentist comments",
+            placeholder="e.g. 24 is absent: the premolar numbered 24 is 25. 18 is absent.",
+            disabled=run is None,
+            help=None if run else "This run wasn't logged, so a comment on it can't be saved.",
+        )
+        submitted = st.form_submit_button("Save comment", disabled=run is None)
+    if run is None:
+        st.caption("Comments are saved to the run log, which didn't record this run (see the warning above).")
+        return
+    if submitted:
+        if not comment.strip():
+            st.warning("Type a comment before saving.")
+        else:
+            try:
+                inference_runs.log_comment(run, comment)
+            except inference_runs.RunLogError as exc:
+                st.error(f"Comment not saved: {exc}")
+            else:
+                result.setdefault("comments", []).append(comment.strip())
+                _cached_versions.clear()
+                _cached_runs.clear()
+    for saved in result.get("comments", []):
+        st.success(f"Saved to the run log (model version `{run['modelVersion']}`): {saved}")
+
+
 def _log_run(**run_fields) -> dict | None:
     """Log the run to Convex (inference_runs.py); a logging failure is shown but
     doesn't stop the result being displayed. Returns the stored run, or None."""
@@ -399,6 +430,7 @@ def _runs_frame(runs: list[dict], columns: list[str]) -> pd.DataFrame:
             "Uncertain": r["uncertainCount"],
             "Duration (s)": r["durationS"],
             "Error": r.get("error", ""),
+            "Dentist comment": r.get("dentistComment", ""),
         }
         for r in runs
     ]
@@ -416,6 +448,8 @@ def _render_logged_run(run_id: str) -> None:
     st.caption(f"{_format_ms(run['ranAt'])} -- `{run['modelVersion']}` -- {run['mode']} -- {run['durationS']} s")
     if run.get("error"):
         st.error(f"Failed: {run['error']}")
+    if run.get("dentistComment"):
+        st.info(f"**Dentist comment** (on run `{run['commentOnRunId']}`): {run['dentistComment']}")
 
     outputs = run.get("outputs") or {}
     detections = outputs.get("detections") or []
@@ -460,7 +494,10 @@ def _render_logged_run(run_id: str) -> None:
     if other_runs:
         st.markdown("**Other runs on this X-ray**")
         st.dataframe(
-            _runs_frame(other_runs, ["Ran at", "Model version", "Mode", "Teeth", "Missing", "Uncertain", "Error"]),
+            _runs_frame(
+                other_runs,
+                ["Ran at", "Model version", "Mode", "Teeth", "Missing", "Uncertain", "Error", "Dentist comment"],
+            ),
             use_container_width=True,
             hide_index=True,
         )
@@ -504,6 +541,7 @@ def _render_run_log() -> None:
                     "Modes": ", ".join(v["modes"]),
                     "Avg teeth": _per_version_average(v, "totalTeeth", 1),
                     "Avg duration (s)": _per_version_average(v, "totalDurationS", 2),
+                    "Dentist comments": v.get("comments", 0),
                     "First run": _format_ms(v["firstRanAt"]),
                     "Last run": _format_ms(v["lastRanAt"]),
                 }
@@ -528,7 +566,18 @@ def _render_run_log() -> None:
     table_state = st.dataframe(
         _runs_frame(
             runs,
-            ["Ran at", "Mode", "Source", "X-ray", "Teeth", "Missing", "Uncertain", "Duration (s)", "Error"],
+            [
+                "Ran at",
+                "Mode",
+                "Source",
+                "X-ray",
+                "Teeth",
+                "Missing",
+                "Uncertain",
+                "Duration (s)",
+                "Error",
+                "Dentist comment",
+            ],
         ),
         use_container_width=True,
         hide_index=True,
@@ -719,6 +768,9 @@ def main() -> None:
             "checkpoint": settings.get("stage1", {}).get("checkpoint"),
             "model_version": version,
             "run_id": run["runId"] if run else None,
+            # The logged run as stored, so a dentist comment can repeat its values.
+            "run": run,
+            "comments": [],
         }
         # A fresh run invalidates whatever tooth was selected before (it may not
         # even exist in the new detection set), and any pending click/row
@@ -767,6 +819,8 @@ def main() -> None:
                 st.rerun()
     else:
         st.image(canvas_rgb, caption=filename, use_container_width=True)
+
+    _render_comment_box(result)
 
     st.subheader("Summary")
     if "model_version" in result:

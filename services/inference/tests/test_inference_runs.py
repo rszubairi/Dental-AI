@@ -109,3 +109,28 @@ def test_redirect_explains_wrong_site_url(monkeypatch):
     monkeypatch.setattr(httpx, "request", lambda *a, **kw: redirect)
     with pytest.raises(RunLogError, match="convex.site"):
         inference_runs.list_versions()
+
+
+def test_comment_copies_run_values_under_new_id():
+    run = build_run(**_fields(outputs={"detections": [], "missing_teeth": ["24"]}))
+    row = inference_runs.build_comment(run, "  24 is absent, the premolar is 25  ")
+    assert row["dentistComment"] == "24 is absent, the premolar is 25"
+    assert row["commentOnRunId"] == run["runId"]
+    assert row["runId"] != run["runId"]
+    same = {k: v for k, v in row.items() if k not in ("runId", "ranAt", "dentistComment", "commentOnRunId")}
+    assert same == {k: v for k, v in run.items() if k not in ("runId", "ranAt")}
+    assert row["modelVersion"] == "test+0000abcd"
+
+
+def test_empty_comment_rejected():
+    run = build_run(**_fields())
+    with pytest.raises(ValueError):
+        inference_runs.build_comment(run, "   ")
+
+
+def test_log_comment_posts_row_without_reuploading_sample(monkeypatch):
+    calls, uploads = _fake_convex(monkeypatch, sample_exists=False)
+    run = build_run(**_fields())
+    row = inference_runs.log_comment(run, "Check Q3 numbering")
+    assert uploads == [] and [path for _, path, _ in calls] == ["/runs"]
+    assert json.loads(calls[0][2]["content"])["commentOnRunId"] == run["runId"] == row["commentOnRunId"]

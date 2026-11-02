@@ -12,6 +12,8 @@ Configure with:
                           (npx convex env set INFERENCE_LOG_SECRET ...)
 
 Dentist corrections (numbering_corrections.py) record the run_id they correct.
+Dentist comments (log_comment) are stored as extra rows copying the run they're
+about, with the comment and that run's runId added.
 """
 
 from __future__ import annotations
@@ -173,6 +175,35 @@ def log_run(*, raw_bytes: bytes, **run_fields) -> dict:
         headers={"Content-Type": "application/json"},
     )
     return run
+
+
+def build_comment(run: dict, comment: str) -> dict:
+    """A dentist's comment on a logged run, as its own row: the run's values
+    (sample, model version, settings, outputs, ...) under a new runId and the
+    time of the comment, with dentistComment and commentOnRunId added."""
+    comment = comment.strip()
+    if not comment:
+        raise ValueError("The comment is empty.")
+    return {
+        **run,
+        "runId": uuid.uuid4().hex,
+        "ranAt": int(time.time() * 1000),
+        "dentistComment": comment,
+        "commentOnRunId": run["runId"],
+    }
+
+
+def log_comment(run: dict, comment: str) -> dict:
+    """Store a dentist's comment on `run` (as returned by log_run) in Convex. The
+    run's X-ray is already stored. Returns the stored row; raises RunLogError."""
+    row = build_comment(run, comment)
+    _request(
+        "POST",
+        "/runs",
+        content=json.dumps(row, default=float),
+        headers={"Content-Type": "application/json"},
+    )
+    return row
 
 
 def list_versions() -> list[dict]:
