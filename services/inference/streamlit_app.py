@@ -83,6 +83,44 @@ except ImportError:
 
 sys.path.insert(0, str(BASE_DIR))
 
+
+def _is_local_module_file(path: str | None) -> bool:
+    """Whether `path` is one of this service's own modules (not this script, and not
+    an installed package: the local .venv lives under BASE_DIR too)."""
+    if not path:
+        return False
+    resolved = Path(path).resolve()
+    return (
+        resolved.is_relative_to(BASE_DIR)
+        and resolved != Path(__file__).resolve()
+        and "site-packages" not in resolved.parts
+    )
+
+
+def _drop_stale_local_modules() -> bool:
+    """Forget this service's modules whose source changed since they were imported.
+
+    Streamlit reruns this script on every interaction but keeps imported modules in
+    sys.modules, so after a deploy (Streamlit Cloud pulls new code into the running
+    app) this file would run against the old inference_runs/inference/... and fail
+    on anything new. Returns whether any were dropped."""
+    dropped = False
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None)
+        if not _is_local_module_file(path):
+            continue
+        try:
+            changed = os.path.getmtime(path) > getattr(module, "_streamlit_loaded_at", 0)
+        except OSError:
+            changed = True
+        if changed:
+            del sys.modules[name]
+            dropped = True
+    return dropped
+
+
+_LOCAL_MODULES_RELOADED = _drop_stale_local_modules()
+
 import inference  # noqa: E402
 import inference_runs  # noqa: E402
 import model_version  # noqa: E402
@@ -103,6 +141,10 @@ from postprocessing.fdi_mapping import FDI_TOOTH_NUMBERS  # noqa: E402
 from postprocessing.missing_tooth import find_absent_wisdom_teeth, find_missing_teeth  # noqa: E402
 from postprocessing.overlap_dedup import _iou  # noqa: E402
 from preprocessing.image_loader import load_image  # noqa: E402
+
+for _module in list(sys.modules.values()):
+    if _is_local_module_file(getattr(_module, "__file__", None)) and not hasattr(_module, "_streamlit_loaded_at"):
+        _module._streamlit_loaded_at = time.time()
 
 # BGR tuples (kept BGR so landmark drawing via cv2 below doesn't need its own
 # separate color table) -- converted to "rgb(r,g,b)" strings for Plotly via
@@ -131,6 +173,11 @@ def _bgr_to_rgb_str(bgr: tuple[int, int, int]) -> str:
 @st.cache_resource(show_spinner=False)
 def _load_pipelines() -> tuple[ToothDetectionPipeline, PathologyClassificationPipeline, LandmarkRegressionPipeline]:
     return ToothDetectionPipeline(), PathologyClassificationPipeline(), LandmarkRegressionPipeline()
+
+
+if _LOCAL_MODULES_RELOADED:
+    # Pipelines cached by the previous code would still run it.
+    _load_pipelines.clear()
 
 
 def _list_validation_images() -> list[Path]:
