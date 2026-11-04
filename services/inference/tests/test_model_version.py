@@ -43,3 +43,14 @@ def test_id_carries_release_label_and_only_used_stages(tmp_path, monkeypatch):
     assert version["id"].startswith("2026.11.0+")
     assert set(version["components"]) == {"stage1", "code"}
     assert version["components"]["stage1"]["weights"] == "missing"
+
+
+def test_stage2a_crop_recipe_changes_version(tmp_path, monkeypatch):
+    for name in ("best.pt", "classes.json"):
+        (tmp_path / name).write_text(name)
+    monkeypatch.setattr(inference, "PATHOLOGY_CHECKPOINT_PATH", str(tmp_path / "best.pt"))
+    monkeypatch.setattr(inference, "PATHOLOGY_CLASSES_PATH", str(tmp_path / "classes.json"))
+    without_recipe = model_version.describe("full_assessment")["components"]["stage2a"]["weights"]
+    (tmp_path / "crop.json").write_text('{"style": "crown", "size": 256}')
+    assert without_recipe != "missing"
+    assert model_version.describe("full_assessment")["components"]["stage2a"]["weights"] != without_recipe

@@ -214,6 +214,18 @@ def main() -> None:
     with open(out_dir / "classes.json", "w", encoding="utf-8") as f:
         json.dump(train_ds.classes, f)
 
+    # inference.py must cut crops the way this dataset's were cut, at the size the
+    # model sees them. Datasets prepared before crop.json existed are whole-tooth crops.
+    dataset_crop_path = Path(args.data) / "crop.json"
+    if dataset_crop_path.exists():
+        with open(dataset_crop_path, encoding="utf-8") as f:
+            crop = json.load(f)
+    else:
+        print(f"WARNING: {dataset_crop_path} not found; recording whole-tooth crops (padding 0.2).")
+        crop = {"style": "tooth", "padding": 0.2}
+    with open(out_dir / "crop.json", "w", encoding="utf-8") as f:
+        json.dump({**crop, "size": args.input_size}, f)
+
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
 

@@ -24,7 +24,7 @@ from postprocessing.missing_tooth import (
 )
 from postprocessing.overlap_dedup import deduplicate_overlapping_detections
 from preprocessing.image_loader import load_image
-from preprocessing.training_transforms import apply_clahe, extract_crop, letterbox, to_rgb
+from preprocessing.training_transforms import apply_clahe, extract_crop, extract_crown_crop, letterbox, to_rgb
 
 MODEL_CHECKPOINT_PATH = os.environ.get(
     "TOOTH_DETECTION_CHECKPOINT", "models/tooth_detection/weights/best.pt"
@@ -56,8 +56,15 @@ CANDIDATE_CONFIDENCE_FLOOR = min(DETECTION_CONFIDENCE_THRESHOLD, DETECTOR_MISS_M
 # which this threshold cannot touch since Ultralytics NMS never compares across
 # classes) are caught separately by postprocessing/overlap_dedup.py below.
 DETECTION_NMS_IOU_THRESHOLD = float(os.environ.get("DETECTION_NMS_IOU_THRESHOLD", "0.4"))
-PATHOLOGY_CROP_SIZE = 128
-PATHOLOGY_CROP_PADDING = 0.2
+# How Stage 2A's per-tooth crops are cut must match how the checkpoint's training
+# crops were cut: a crown-trained model fed whole-tooth crops sees roots it never
+# saw in training and calls them periapical lesions, missing the caries (dentist
+# review of dev+e3829f0f). Each checkpoint records its recipe in crop.json next to
+# its classes.json (written by train_pathology_classifier.py):
+#   {"style": "tooth", "size": 128, "padding": 0.2}  -- padded whole-tooth crop
+#   {"style": "crown", "size": 256}                  -- extract_crown_crop
+# Checkpoints without one were trained on the whole-tooth default.
+DEFAULT_PATHOLOGY_CROP = {"style": "tooth", "size": 128, "padding": 0.2}
 # A pathology class (caries/deep_caries/periapical_lesion/impacted) is only reported
 # when its softmax probability clears this bar; otherwise the tooth is reported as
 # "healthy" instead of a low-confidence argmax call. Raise this if dentist review finds
@@ -201,6 +208,32 @@ class ToothDetectionPipeline:
         return detections, missing_teeth, uncertain_teeth, image
 
 
+def pathology_crop_path() -> str:
+    """The current Stage 2A checkpoint's crop.json (see DEFAULT_PATHOLOGY_CROP)."""
+    return os.path.join(os.path.dirname(PATHOLOGY_CLASSES_PATH), "crop.json")
+
+
+def load_pathology_crop() -> dict:
+    path = pathology_crop_path()
+    if not os.path.exists(path):
+        return dict(DEFAULT_PATHOLOGY_CROP)
+    with open(path, encoding="utf-8") as f:
+        crop = json.load(f)
+    if crop.get("style") == "crown":
+        return crop
+    if crop.get("style") == "tooth":
+        return {**DEFAULT_PATHOLOGY_CROP, **crop}
+    raise RuntimeError(f"Unknown crop style in {path}: {crop.get('style')!r}")
+
+
+def extract_pathology_crop(image: np.ndarray, bbox_xywh: tuple, crop: dict) -> np.ndarray:
+    if crop["style"] == "crown":
+        # No FDI number: prepare_stage2a_dataset.py --crown-focus cut the training
+        # crops without one (upper/lower jaw from the box's position), so do the same.
+        return extract_crown_crop(image, bbox_xywh, output_size=crop["size"])
+    return extract_crop(image, bbox_xywh, crop["padding"], crop["size"])
+
+
 class PathologyClassificationPipeline:
     """Classifies pathology (caries, deep caries, periapical lesion, impacted, healthy)
     for each per-tooth crop, given bboxes from ToothDetectionPipeline."""
@@ -210,6 +243,7 @@ class PathologyClassificationPipeline:
         self._classes: list[str] | None = None
         self._device = None
         self._transform = None
+        self._crop: dict | None = None
 
     def _load_model(self):
         if self._model is not None:
@@ -229,6 +263,7 @@ class PathologyClassificationPipeline:
 
         with open(PATHOLOGY_CLASSES_PATH, encoding="utf-8") as f:
             self._classes = json.load(f)
+        self._crop = load_pathology_crop()
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = models.efficientnet_b3()
@@ -259,7 +294,7 @@ class PathologyClassificationPipeline:
         for det in detections:
             x0, y0, x1, y1 = det["bbox"]
             bbox_xywh = (x0, y0, x1 - x0, y1 - y0)
-            crop = extract_crop(enhanced, bbox_xywh, PATHOLOGY_CROP_PADDING, PATHOLOGY_CROP_SIZE)
+            crop = extract_pathology_crop(enhanced, bbox_xywh, self._crop)
             rgb_crop = to_rgb(crop)
             tensor = self._transform(rgb_crop).unsqueeze(0).to(self._device)
 

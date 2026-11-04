@@ -76,8 +76,13 @@ def _stage_component(stage: str) -> dict[str, str]:
             "settings": f"conf={inference.DETECTION_CONFIDENCE_THRESHOLD},iou={inference.DETECTION_NMS_IOU_THRESHOLD}",
         }
     if stage == "stage2a":
+        files = [inference.PATHOLOGY_CHECKPOINT_PATH, inference.PATHOLOGY_CLASSES_PATH]
+        # The crop recipe changes the output as much as the weights; optional, as
+        # checkpoints trained before it existed have none.
+        if os.path.exists(inference.pathology_crop_path()):
+            files.append(inference.pathology_crop_path())
         return {
-            "weights": _files_digest([inference.PATHOLOGY_CHECKPOINT_PATH, inference.PATHOLOGY_CLASSES_PATH]),
+            "weights": _files_digest(files),
             "settings": f"conf={inference.PATHOLOGY_CONFIDENCE_THRESHOLD}",
         }
     return {
