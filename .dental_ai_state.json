@@ -41,5 +41,11 @@
     "checkpoint": "services\\inference\\training\\runs\\stage2a_crown256_focal\\best.pt",
     "macro_auc": 0.8361967169413251,
     "completed_at": "2026-10-22T00:03:21.575571+00:00"
+  },
+  "stage2a_crown256_focal_v2": {
+    "complete": true,
+    "checkpoint": "runs\\stage2a_crown256_focal_v2\\best.pt",
+    "macro_auc": 0.8690582881204347,
+    "completed_at": "2026-11-04T19:42:47.101107+00:00"
   }
 }
