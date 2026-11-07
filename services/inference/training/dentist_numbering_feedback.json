@@ -1,0 +1,30 @@
+{
+  "_about": "Dentist review of Stage 1 numbering on DENTEX validation X-rays (quadrant_enumeration_disease/xrays), from her feedback on dev+0671fd92 (stage1_rect_v1, stage2a_crown256_focal), 2026-11-06. Keys of 'relabel' are the detector's labels she was shown, values the true FDI number. 'candidates_real' / 'candidates_not_teeth' are the 'Possible extra teeth' candidates (uncertain_teeth) she confirmed or rejected. 'missed' are teeth she says the detector didn't find. Caries findings are in dentist_caries_labels.json; 'not_pathology' are other findings she rejected.",
+  "xrays": {
+    "val_0.png": {
+      "relabel": {"48": "47", "47": "46", "37": "36", "38": "37", "31": "41", "32": "31"},
+      "candidates_real": ["14"],
+      "missed": ["32"],
+      "unclear": "She says '45 is missing' while the detector shows a 45 (and calls 44 missing): either the detector's 45 is really 44, or 45 should be listed as missing."
+    },
+    "val_16.png": {
+      "relabel": {"28": "27"},
+      "candidates_real": ["15"]
+    },
+    "val_20.png": {
+      "missed": ["15", "16"]
+    },
+    "val_24.png": {
+      "candidates_real": ["14", "44"],
+      "candidates_not_teeth": ["11", "12", "21"],
+      "not_pathology": {"45": "periapical lesion"}
+    },
+    "val_28.png": {
+      "relabel": {"14": "13"},
+      "candidates_real": [],
+      "missed": ["24"],
+      "not_pathology": {"17": "impacted"},
+      "unclear": "She says '14 is 13' and also 'real 13 isn't detected'; one of them may mean the real 14 is the undetected tooth. She also says 24 isn't detected, where the detector had a 24 candidate (possible_numbering_error)."
+    }
+  }
+}

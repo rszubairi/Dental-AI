@@ -1,10 +1,10 @@
 {
-  "_about": "Dentist review of DENTEX validation X-rays (quadrant_enumeration_disease/xrays), from her Streamlit comments on dev+e3829f0f, 2026-11-05. She lists every tooth with caries (FDI); every other tooth on the X-ray is caries-free. Says nothing about other pathology. Corrections she gave later are applied: val_32 '12' meant 11; val_12 'no caries' was wrong, 44 has caries.",
+  "_about": "Dentist review of DENTEX validation X-rays (quadrant_enumeration_disease/xrays), from her Streamlit comments on dev+e3829f0f, 2026-11-05. She lists every tooth with caries (FDI); every other tooth on the X-ray is caries-free. Says nothing about other pathology. Corrections she gave later are applied: val_32 '12' meant 11; val_12 'no caries' was wrong, 44 has caries; val_28 37 has deep caries (review of dev+0671fd92, 2026-11-06). Tooth numbers are the Stage 1 detector's (stage1_rect_v1) labels she was shown, not always the true FDI number: e.g. on val_0 the detector's 47 and 37 are really 46 and 36.",
   "caries_teeth": {
     "val_0.png": ["37", "47"],
     "val_12.png": ["44"],
     "val_16.png": ["47", "48", "37", "24", "15"],
-    "val_28.png": ["12"],
+    "val_28.png": ["12", "37"],
     "val_32.png": ["26", "27", "11"],
     "val_4.png": ["21", "22"],
     "val_44.png": ["47", "22", "12"],

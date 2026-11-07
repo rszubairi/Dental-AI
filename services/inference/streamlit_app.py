@@ -671,6 +671,10 @@ def main() -> None:
 
         # Stage 2A Checkpoint selection
         available_stage2a_checkpoints = {
+            "Dentist-tuned (Crown 256x256, v4)": {
+                "weights": str(TRAINING_DIR / "runs/stage2a_crown256_focal_v4_dentist/best.pt"),
+                "classes": str(TRAINING_DIR / "runs/stage2a_crown256_focal_v4_dentist/classes.json"),
+            },
             "Enhanced (Crown 256x256 + Focal Loss)": {
                 "weights": str(TRAINING_DIR / "runs/stage2a_crown256_focal/best.pt"),
                 "classes": str(TRAINING_DIR / "runs/stage2a_crown256_focal/classes.json"),

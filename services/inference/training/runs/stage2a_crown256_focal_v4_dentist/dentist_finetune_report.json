@@ -1,0 +1,58 @@
+{
+  "cross_validation": {
+    "0.6": {
+      "base": {
+        "found": 11,
+        "caries_teeth": 17,
+        "false_flags": 46
+      },
+      "fine_tuned_on_other_xrays": {
+        "found": 9,
+        "caries_teeth": 17,
+        "false_flags": 14
+      }
+    },
+    "0.7": {
+      "base": {
+        "found": 8,
+        "caries_teeth": 17,
+        "false_flags": 20
+      },
+      "fine_tuned_on_other_xrays": {
+        "found": 6,
+        "caries_teeth": 17,
+        "false_flags": 9
+      }
+    },
+    "0.8": {
+      "base": {
+        "found": 6,
+        "caries_teeth": 17,
+        "false_flags": 6
+      },
+      "fine_tuned_on_other_xrays": {
+        "found": 6,
+        "caries_teeth": 17,
+        "false_flags": 3
+      }
+    }
+  },
+  "dentex_val_macro_auc": {
+    "base": 0.8691,
+    "fine_tuned": 0.8614
+  },
+  "args": {
+    "base": "runs/stage2a_crown256_focal_v2",
+    "data": "../../../datasets/Dentex/stage2a_crown256_v2",
+    "out": "runs/stage2a_crown256_focal_v4_dentist",
+    "tooth_checkpoint": "runs/stage1_rect_v1/train/weights/best.pt",
+    "folds": 4,
+    "epochs": 5,
+    "steps_per_epoch": 100,
+    "batch_size": 32,
+    "dentist_batch": 16,
+    "dentist_weight": 1.0,
+    "lr": 1e-05,
+    "input_size": 256
+  }
+}
