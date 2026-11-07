@@ -655,9 +655,11 @@ def main() -> None:
         st.header("Settings")
 
         # Stage 1 Checkpoint selection
+        # Baseline first: it numbers teeth better than the rectangular model on held-out
+        # DENTEX images (training/evaluate_numbering.py: 95.9% vs 94.8% label accuracy).
         available_stage1_checkpoints = {
-            "Enhanced (Rectangular 512x1024)": str(TRAINING_DIR / "runs/stage1_rect_v1/train/weights/best.pt"),
             "Baseline (Square 640x640)": str(TRAINING_DIR / "runs/stage1/train/weights/best.pt"),
+            "Rectangular (512x1024)": str(TRAINING_DIR / "runs/stage1_rect_v1/train/weights/best.pt"),
         }
         existing_stage1 = {
             name: path for name, path in available_stage1_checkpoints.items() if Path(path).exists()
